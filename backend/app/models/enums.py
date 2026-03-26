@@ -1,0 +1,106 @@
+from enum import Enum
+
+class UserRole(str, Enum): 
+    CLIENT = "CLIENT"
+    COURIER = "COURIER"   
+    ADMIN = "ADMIN"
+
+class CourierStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    OFFLINE = "OFFLINE"
+    ON_BREAK = "ON_BREAK"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+
+class OrderStatus(str, Enum):
+    PENDING = "PENDING"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    ARRIVED = "ARRIVED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    FAILED = "FAILED" 
+
+class OrderQueueStatus(str, Enum):
+    OFFERED = "OFFERED"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
+
+class DeclineReason(str, Enum):
+    COURIER_DECLINED = "COURIER_DECLINED"
+    TIMEOUT = "TIMEOUT"
+    DISTANCE_TOO_FAR = "DISTANCE_TOO_FAR"
+    TOO_HEAVY = "TOO_HEAVY"
+    OTHER = "OTHER"
+
+class GarbageType(str, Enum):
+    HOUSEHOLD = "HOUSEHOLD"
+    CONSTRUCTION = "CONSTRUCTION"
+
+class AddressLabel(str, Enum):
+    HOME = "HOME"
+    DACHA = "DACHA"
+    WORK = "WORK"
+    PARENTS = "PARENTS"
+    OTHER = "OTHER"
+
+class OrderMode(str, Enum):
+    TEST = "TEST"
+    PRODUCTION = "PRODUCTION"
+
+class SubscriptionTier(str, Enum):
+    FREE = "FREE"
+    BASIC = "BASIC"
+    PREMIUM = "PREMIUM"
+
+class PaymentType(str, Enum):
+    ORDER_PAYMENT = "ORDER_PAYMENT"
+    REFUND = "REFUND"
+    SUBSCRIPTION_PURCHASE = "SUBSCRIPTION_PURCHASE"
+
+class PaymentStatus(str, Enum):
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+class PaymentMethod(str, Enum):
+    CARD = "CARD"
+
+class NotificationType(str, Enum):
+    ORDER_CREATED = "ORDER_CREATED"
+    ORDER_ASSIGNED = "ORDER_ASSIGNED"
+    ORDER_STARTED = "ORDER_STARTED"
+    ORDER_COMPLETED = "ORDER_COMPLETED"
+    ORDER_CANCELLED = "ORDER_CANCELLED"
+    PAYMENT_RECEIVED = "PAYMENT_RECEIVED"
+    RATING_RECEIVED = "RATING_RECEIVED"
+    NEW_OFFER = "NEW_OFFER"
+    OFFER_TIMEOUT = "OFFER_TIMEOUT"
+    SUBSCRIPTION_RENEWED = "SUBSCRIPTION_RENEWED"
+    SUBSCRIPTION_EXPIRING = "SUBSCRIPTION_EXPIRING"
+    DAILY_STATS = "DAILY_STATS"
+    SHIFT_ENDED = "SHIFT_ENDED"
+    SHIFT_REMINDER = "SHIFT_REMINDER"
+
+class NotificationChannel(str, Enum):
+    TELEGRAM = "TELEGRAM"
+    IN_APP = "IN_APP"
+    SMS = "SMS"
+    EMAIL = "EMAIL"
+
+class AuditAction(str, Enum):
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+    ACCEPT = "ACCEPT"
+    DECLINE = "DECLINE"
+    COMPLETE = "COMPLETE"
+    CANCEL = "CANCEL"
+    PAYMENT = "PAYMENT"
+    LOGIN = "LOGIN"
+    LOGOUT = "LOGOUT"
+
+class CourierApplicationStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
