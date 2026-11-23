@@ -65,3 +65,10 @@ jobs:
       - run: npm run lint -- --max-warnings 0
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
+
+  production-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f docker/Dockerfile.backend -t ecohaul-backend:ci .
+      - run: docker run --rm ecohaul-backend:ci python -c "from app.main import app; print(app.title)"
