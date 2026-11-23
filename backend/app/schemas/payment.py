@@ -134,7 +134,7 @@ class PaymentResponse(UUIDMixin, TimestampMixin, PaymentBase):
                     PaymentStatus.CANCELLED,
                 ]
             if "used_wallet" not in data:
-                data["used_wallet"] = payment_method == PaymentMethod.WALLET
+                data["used_wallet"] = False  # Wallet support was removed; retain response compatibility.
             if "used_card" not in data:
                 data["used_card"] = payment_method == PaymentMethod.CARD
             if "processing_time_seconds" not in data:

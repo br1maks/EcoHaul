@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, MapPin, User, Package, Clock, DollarSign, UserCheck, Loader2, AlertCircle } from 'lucide-react';
 import { Card } from '@/shared/components/Card';
@@ -8,7 +8,7 @@ import { MapView } from '@/shared/components';
 import { Star } from 'lucide-react';
 import { reviewsApi, usersApi } from '@/lib/api';
 import type { Review, User as UserType } from '@/shared/types'
-import { ordersApi, type OrderResponse, type GarbageType } from '@/lib/api';
+import { ordersApi, type OrderResponse, type GarbageType, type OrderStatus } from '@/lib/api';
 import { AssignCourierModal } from '@/shared/components/AssihnCourierModal';
 
 export const AdminOrderDetailPage = () => {
@@ -22,7 +22,7 @@ export const AdminOrderDetailPage = () => {
   const [client, setClient] = useState<UserType | null>(null);
   const [courier, setCourier] = useState<UserType | null>(null);
 
-  const fetchOrder = async () => {
+  const fetchOrder = useCallback(async () => {
     if (!id) return;
     try {
       setLoading(true);
@@ -61,11 +61,13 @@ export const AdminOrderDetailPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     fetchOrder();
-  }, [id]);
+  }, [fetchOrder]);
+
+
 
   if (loading) {
     return (
@@ -136,7 +138,7 @@ export const AdminOrderDetailPage = () => {
   const handleChangeStatus = async (newStatus: string) => {
     try {
       if (!id) return;
-      const updatedOrder = await ordersApi.updateOrderStatus(id, newStatus as any);
+      const updatedOrder = await ordersApi.updateOrderStatus(id, newStatus as OrderStatus);
       setOrder(updatedOrder);
       alert(`Статус успешно изменён на: ${newStatus}`);
     } catch (err) {

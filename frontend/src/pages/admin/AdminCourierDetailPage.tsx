@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, User, Phone, Mail, Package, Star, MapPin, Clock, DollarSign, Loader2, AlertCircle, ShieldCheck, ShieldX, Shield, ChevronDown, ChevronUp, Calendar, TrendingUp } from 'lucide-react';
 import { Card } from '@/shared/components/Card';
@@ -30,13 +30,9 @@ export const AdminCourierDetailPage = () => {
   const [shiftsPage, setShiftsPage] = useState(1);
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (id) {
-      fetchCourierData();
-    }
-  }, [id]);
 
-  const fetchCourierData = async () => {
+
+  const fetchCourierData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -61,7 +57,13 @@ export const AdminCourierDetailPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) {
+      fetchCourierData();
+    }
+  }, [id, fetchCourierData]);
 
   const handleVerifyCourier = async () => {
     if (!courier) return;
@@ -164,7 +166,7 @@ export const AdminCourierDetailPage = () => {
     return h > 0 ? `${h}ч ${m}м` : `${m}м`;
   };
 
-  const loadShifts = async (page = 1) => {
+  const loadShifts = useCallback(async (page = 1) => {
     if (!id) return;
     try {
       setShiftsLoading(true);
@@ -181,11 +183,11 @@ export const AdminCourierDetailPage = () => {
     } finally {
       setShiftsLoading(false);
     }
-  };
+  }, [id, dateFrom, dateTo]);
 
   useEffect(() => {
     if (id) loadShifts(1);
-  }, [id]);
+  }, [id, loadShifts]);
 
   const GARBAGE_LABELS: Record<string, string> = { HOUSEHOLD: 'Бытовой', CONSTRUCTION: 'Строительный' };
   const STATUS_LABELS: Record<string, string> = {

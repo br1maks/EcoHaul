@@ -1,4 +1,5 @@
 from fastapi import Depends, HTTPException, status
+from uuid import UUID
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,10 @@ async def get_current_user(
 
     user_id = payload.get("sub")
     if user_id is None:
+        raise credentials_exception
+    try:
+        user_id = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
         raise credentials_exception
 
     stmt = select(User).where(User.id == user_id)
@@ -86,3 +91,13 @@ async def require_admin(
             detail="Требуется роль админа",
         )
     return current_user
+
+
+async def require_order_operator(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    if current_user.role == UserRole.ADMIN:
+        return current_user
+    if current_user.role == UserRole.COURIER and current_user.is_verified:
+        return current_user
+    raise HTTPException(status_code=403, detail="Требуется верифицированный курьер или администратор")

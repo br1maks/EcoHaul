@@ -74,7 +74,7 @@ export const ProfilePage = () => {
     }
 
     if (formData.phone && formData.phone.trim()) {
-      const phoneClean = formData.phone.replace(/[\s\-\(\)]/g, '');
+      const phoneClean = formData.phone.replace(/[\s\-()]/g, '');
       if (!/^\+375(29|33|44|25)\d{7}$/.test(phoneClean)) {
         errors.phone = 'Формат: +375 29/33/44/25 XXX-XX-XX';
       }

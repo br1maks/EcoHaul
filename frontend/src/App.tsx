@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import type { Toast } from 'react-hot-toast';
 import { Toaster, ToastBar, toast } from 'react-hot-toast';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { initTelegramWebApp } from "@/lib/telegram/utils";
@@ -8,34 +9,59 @@ import { RoleBasedRedirect } from '@/shared/components';
 import { MainLayout } from '@/layouts/MainLayout';
 import { CourierLayout } from '@/layouts/CourierLayout';
 import { AdminLayout } from '@/layouts/AdminLayout';
-import { OrdersPage } from '@/pages/client/OrdersPage';
-import { OrderDetailPageWrapper } from '@/pages/client/OrderDetailPageWrapper';
-import { NewOrderPageWrapper } from '@/pages/client/NewOrderPageWrapper';
-import { WalletPage } from '@/pages/client/WalletPage';
-import { SubscriptionsPage } from '@/pages/client/SubscriptionsPage';
-import { ProfilePage } from '@/pages/client/ProfilePage';
-import { AddressesPage } from '@/pages/client/AddressesPage';
-import { CourierDashboardPage } from '@/pages/courier/CourierDashboardPage';
-import { CourierDashboardPageProfessional } from '@/pages/courier/CourierDashboardPageProfessional';
-import { CourierOrdersPage } from '@/pages/courier/CourierOrdersPage';
-import { CourierOrderDetailPageWrapper } from '@/pages/courier/CourierOrderDetailPageWrapper';
-import { CourierProfilePage } from '@/pages/courier/CourierProfilePage';
-import { CourierShiftsPage } from '@/pages/courier/CourierShiftsPage';
-import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
-import { AdminOrdersPage } from '@/pages/admin/AdminOrdersPage';
-import { AdminOrderDetailPageWrapper } from '@/pages/admin/AdminOrderDetailPageWrapper';
-import { AdminClientsPage } from '@/pages/admin/AdminClientsPage';
-import { AdminClientDetailPageWrapper } from '@/pages/admin/AdminClientDetailPageWrapper';
-import { AdminCouriersPage } from '@/pages/admin/AdminCouriersPage';
-import { AdminCourierDetailPageWrapper } from '@/pages/admin/AdminCourierDetailPageWrapper';
-import { AdminAnalyticsPage } from '@/pages/admin/AdminAnalyticsPage';
-import { AdminCourierApplicationsPage } from '@/pages/admin/AdminCourierApplicationsPage';
-import { BecomeCourierPage } from '@/pages/client/BecomeCourierPage';
-import { AdminLoginPage } from '@/pages/admin/AdminLoginPage';
-import { PaymentSuccessPage } from '@/pages/client/PaymentSuccessPage';
-import { PaymentFailPage } from '@/pages/client/PaymentFailPage';
 
-function SwipeableTost({ t }: { t: any }) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const OrdersPage = lazy(() => import('@/pages/client/OrdersPage').then(module => ({ default: module.OrdersPage })));
+const OrderDetailPageWrapper = lazy(() => import('@/pages/client/OrderDetailPageWrapper').then(module => ({ default: module.OrderDetailPageWrapper })));
+const NewOrderPageWrapper = lazy(() => import('@/pages/client/NewOrderPageWrapper').then(module => ({ default: module.NewOrderPageWrapper })));
+const WalletPage = lazy(() => import('@/pages/client/WalletPage').then(module => ({ default: module.WalletPage })));
+const SubscriptionsPage = lazy(() => import('@/pages/client/SubscriptionsPage').then(module => ({ default: module.SubscriptionsPage })));
+const ProfilePage = lazy(() => import('@/pages/client/ProfilePage').then(module => ({ default: module.ProfilePage })));
+const AddressesPage = lazy(() => import('@/pages/client/AddressesPage').then(module => ({ default: module.AddressesPage })));
+const CourierDashboardPage = lazy(() => import('@/pages/courier/CourierDashboardPage').then(module => ({ default: module.CourierDashboardPage })));
+const CourierOrdersPage = lazy(() => import('@/pages/courier/CourierOrdersPage').then(module => ({ default: module.CourierOrdersPage })));
+const CourierOrderDetailPageWrapper = lazy(() => import('@/pages/courier/CourierOrderDetailPageWrapper').then(module => ({ default: module.CourierOrderDetailPageWrapper })));
+const CourierProfilePage = lazy(() => import('@/pages/courier/CourierProfilePage').then(module => ({ default: module.CourierProfilePage })));
+const CourierShiftsPage = lazy(() => import('@/pages/courier/CourierShiftsPage').then(module => ({ default: module.CourierShiftsPage })));
+const AdminDashboardPage = lazy(() => import('@/pages/admin/AdminDashboardPage').then(module => ({ default: module.AdminDashboardPage })));
+const AdminOrdersPage = lazy(() => import('@/pages/admin/AdminOrdersPage').then(module => ({ default: module.AdminOrdersPage })));
+const AdminOrderDetailPageWrapper = lazy(() => import('@/pages/admin/AdminOrderDetailPageWrapper').then(module => ({ default: module.AdminOrderDetailPageWrapper })));
+const AdminClientsPage = lazy(() => import('@/pages/admin/AdminClientsPage').then(module => ({ default: module.AdminClientsPage })));
+const AdminClientDetailPageWrapper = lazy(() => import('@/pages/admin/AdminClientDetailPageWrapper').then(module => ({ default: module.AdminClientDetailPageWrapper })));
+const AdminCouriersPage = lazy(() => import('@/pages/admin/AdminCouriersPage').then(module => ({ default: module.AdminCouriersPage })));
+const AdminCourierDetailPageWrapper = lazy(() => import('@/pages/admin/AdminCourierDetailPageWrapper').then(module => ({ default: module.AdminCourierDetailPageWrapper })));
+const AdminAnalyticsPage = lazy(() => import('@/pages/admin/AdminAnalyticsPage').then(module => ({ default: module.AdminAnalyticsPage })));
+const AdminCourierApplicationsPage = lazy(() => import('@/pages/admin/AdminCourierApplicationsPage').then(module => ({ default: module.AdminCourierApplicationsPage })));
+const BecomeCourierPage = lazy(() => import('@/pages/client/BecomeCourierPage').then(module => ({ default: module.BecomeCourierPage })));
+const AdminLoginPage = lazy(() => import('@/pages/admin/AdminLoginPage').then(module => ({ default: module.AdminLoginPage })));
+const PaymentSuccessPage = lazy(() => import('@/pages/client/PaymentSuccessPage').then(module => ({ default: module.PaymentSuccessPage })));
+const PaymentFailPage = lazy(() => import('@/pages/client/PaymentFailPage').then(module => ({ default: module.PaymentFailPage })));
+
+function SwipeableTost({ t }: { t: Toast }) {
   const startX = useRef(0);
   const el = useRef<HTMLDivElement>(null);
 
@@ -68,6 +94,7 @@ function AppInner() {
   return (
     <>
       <BrowserRouter>
+        <Suspense fallback={<div className="p-8 text-center">Загрузка…</div>}>
         <Routes>
           {}
           <Route path="/" element={<MainLayout />}>
@@ -110,8 +137,8 @@ function AppInner() {
           <Route path="/admin/login" element={<AdminLoginPage />} />
 
           {}
-          <Route path="/courier-pro" element={<CourierDashboardPageProfessional />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </>
   );

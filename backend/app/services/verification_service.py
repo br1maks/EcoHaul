@@ -1,5 +1,5 @@
 
-import random
+import secrets
 import string
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
@@ -18,7 +18,7 @@ class VerificationService:
 
     @staticmethod
     def generate_code() -> str:
-        return ''.join(random.choices(string.digits, k=VerificationService.CODE_LENGTH))
+        return ''.join(secrets.choice(string.digits) for _ in range(VerificationService.CODE_LENGTH))
 
     @staticmethod
     async def send_code_via_email(

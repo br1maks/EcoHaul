@@ -1,3 +1,4 @@
+import { errorDetail } from '@/lib/api/errors';
 import { useState, useEffect, useCallback } from 'react';
 import { addressesApi } from '@/lib/api/addresses';
 import { geocodeAddress, type GeocodeResult } from '@/lib/api/geocoding';
@@ -151,9 +152,9 @@ export const AddressesPage = () => {
       await loadAddresses();
       resetForm();
       setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to save address:', err);
-      setError(err.response?.data?.detail || 'Ошибка сохранения адреса');
+      setError(errorDetail(err) || 'Ошибка сохранения адреса');
     } finally {
       setSaving(false);
     }

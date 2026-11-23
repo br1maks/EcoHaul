@@ -2,7 +2,7 @@ export interface ClientStatistics {
     id: string;
     first_name: string;
     last_name: string;
-    phone: string;
+    phone: string | null;
     email: string | null;
     telegram_username: string | null;
     total_orders: number;

@@ -1,21 +1,16 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
-    gdal-bin \
-    libgdal-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-COPY backend/pyproject.toml backend/poetry.lock* ./
+RUN pip install --no-cache-dir poetry==2.5.2 \
+    && poetry config virtualenvs.create false
 
-RUN pip install --no-cache-dir poetry \
-    && poetry config virtualenvs.create false \
-    && poetry install --only main --no-root --no-interaction --no-ansi
+COPY backend/pyproject.toml backend/poetry.lock ./
+RUN poetry install --only main --no-root --no-interaction --no-ansi
 
-COPY backend/ .
+RUN useradd --create-home --uid 10001 app && chown app:app /app
+COPY --chown=app:app backend/ .
+USER app
 
 EXPOSE 8001
 

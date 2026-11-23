@@ -1,0 +1,25 @@
+services:
+  postgres-test:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_DB: ecohaul_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d ecohaul_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

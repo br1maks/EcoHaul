@@ -23,7 +23,7 @@ async def _cancel_expired() -> None:
         stmt = select(Order).where(
             Order.status == OrderStatus.PENDING,
             Order.expires_at < now,
-        )
+        ).with_for_update(skip_locked=True, of=Order)
         result = await db.execute(stmt)
         expired_orders = result.scalars().all()
 

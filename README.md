@@ -1,255 +1,146 @@
 # EcoHaul
 
-A full-stack waste collection service built as a Telegram Mini App. Clients request garbage pickup, couriers accept and complete orders in real time, admins manage the platform through a dedicated web interface.
+**Waste collection, from a Telegram request to a completed courier order.**
 
-## Overview
+[![CI](https://github.com/br1maks/EcoHaul/actions/workflows/ci.yml/badge.svg)](https://github.com/br1maks/EcoHaul/actions/workflows/ci.yml)
 
-EcoHaul is a marketplace connecting residents with couriers for on-demand garbage removal. The platform handles the full order lifecycle — from address validation and pricing to payment processing, real-time delivery tracking, and post-order reviews.
+EcoHaul is a full-stack application for on-demand household waste collection in Minsk.
+Clients manage pickup addresses and orders through a Telegram Mini App; couriers accept
+and complete jobs; administrators manage users, applications, orders and analytics.
 
-The application runs as a Telegram Mini App, meaning clients interact entirely through Telegram's embedded WebView. Couriers and admins use the same React frontend but with role-specific interfaces.
+The project focuses on **Python backend engineering**: asynchronous APIs, PostgreSQL
+transactions, role-based access, background jobs and event-driven interfaces.
+The React/TypeScript frontend provides a working interface for each role.
 
-## Tech Stack
+![EcoHaul administrator dashboard with synthetic demonstration data](docs/assets/admin-dashboard.png)
 
-**Backend**
-- Python 3.11, FastAPI, SQLAlchemy (async), asyncpg
-- PostgreSQL 16 + PostGIS (geospatial queries)
-- Redis — Celery broker and result backend
-- Celery + Celery Beat — background tasks and scheduled jobs
-- aiogram 3 — Telegram bot and notifications
-- Alembic — database migrations
-- JWT (access + refresh tokens), Telegram initData HMAC validation
+*Administrator dashboard. All screenshots use synthetic demonstration data.*
+[View client, courier and admin screens](docs/screenshots.md).
 
-**Frontend**
-- React 18, TypeScript, Vite
-- Tailwind CSS
-- Zustand (state management)
-- React Router v6
-- Axios with JWT interceptor and auto-refresh
+[Quick start](#quick-start) · [Architecture](docs/architecture.md) · [API guide](docs/api.md) · [Development](docs/development.md) · [Security](docs/security.md)
 
-**Infrastructure**
-- Docker Compose (6 services)
-- Nginx — static file serving and reverse proxy
-- Multi-stage Docker builds
+## At a glance
 
-## Architecture
+| Backend | Data & jobs | Frontend | Delivery |
+| --- | --- | --- | --- |
+| Python · FastAPI · Pydantic | PostgreSQL 16 · PostGIS | React 19 · TypeScript | Docker Compose · Nginx |
+| Async SQLAlchemy · Alembic | Redis · Celery · Celery Beat | Vite · Tailwind CSS 4 · Zustand | GitHub Actions |
+| JWT · Telegram initData validation | Row locks · spatial data | Role-specific routes · WebSocket events | Locked Python/npm dependencies |
 
-```
-┌─────────────────────────────────────────────┐
-│              Telegram Mini App               │
-│         (React + TypeScript + Vite)          │
-└──────────────────┬──────────────────────────┘
-                   │ HTTP / WebSocket
-┌──────────────────▼──────────────────────────┐
-│              Nginx (port 80)                 │
-│   /api/* → backend:8001                     │
-│   /* → React SPA (index.html)               │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│           FastAPI (port 8001)                │
-│  REST API + WebSocket (/api/v1/ws)          │
-└────┬──────────────┬───────────────┬─────────┘
-     │              │               │
-┌────▼────┐  ┌──────▼──────┐  ┌───▼───────┐
-│Postgres │  │    Redis     │  │  aiogram  │
-│+PostGIS │  │(broker+cache)│  │ Telegram  │
-└─────────┘  └──────┬───────┘  └───────────┘
-                    │
-         ┌──────────▼──────────┐
-         │  Celery Worker      │
-         │  Celery Beat        │
-         └─────────────────────┘
-```
+## What it does
 
-## Key Features
+- **Client workflow:** save addresses, schedule pickup, see pricing and order history, review couriers.
+- **Courier workflow:** accept available orders, update delivery status, manage shifts and availability.
+- **Admin workflow:** inspect clients and couriers, review applications, assign orders and view analytics.
+- **Order coordination:** server-calculated pricing, expiring unaccepted orders and protected state transitions.
+- **Notifications:** authenticated WebSocket updates and optional background Telegram messages.
+- **Subscriptions and checkout:** tiered discounts and a payment-provider adapter with server-side amount validation and verified, idempotent callbacks.
 
-**Order lifecycle**
+Payment integration is demonstrated in code and tests. A live merchant deployment,
+including BYN/country compatibility, is not claimed. Details: [integration boundaries](docs/security.md#before-a-real-deployment).
 
-Orders move through a defined state machine: `PENDING → ASSIGNED → IN_PROGRESS → ARRIVED → COMPLETED`. Each transition triggers notifications via WebSocket and Telegram simultaneously. Orders that go unaccepted for 30 minutes are automatically cancelled by a scheduled Celery task.
+## Engineering highlights
 
-**Real-time delivery tracking**
+**One order, one courier.** Acceptance uses a PostgreSQL row lock and rechecks status
+and expiration. An integration test races two couriers against the same order.
 
-Clients and couriers communicate through a persistent WebSocket connection (`/api/v1/ws`). New orders are broadcast to all verified online couriers instantly. Status changes are pushed to the relevant client in real time without polling.
+**Permissions backed by current data.** JWTs identify a user; authorization checks the
+active database record and required role. Address and payment access is owner-scoped.
 
-**Courier matching queue**
+**External input is verified.** Telegram launch signatures and timestamps are validated.
+Payment notifications are confirmed through the provider API before local state changes.
 
-When an order is created, the system creates `OrderQueue` records for available couriers. Each offer has a 60-second expiration. Couriers that decline provide a reason (distance, weight, etc.), which is logged. If no courier accepts within 30 minutes, the order auto-cancels.
+**A clean checkout is part of the workflow.** Python and npm lock files are committed;
+CI runs backend tests against PostgreSQL/PostGIS and Redis, checks fresh migrations,
+and builds/lints the frontend.
 
-**Subscription system**
+## Quick start
 
-Three tiers: FREE, BASIC (20% discount), PREMIUM (30% discount). Subscriptions integrate with YooKassa for one-time and recurring payments. Auto-renewal saves a payment method on the first transaction and charges it automatically on the next billing date.
+Requirements: Docker with Compose v2 and Python 3.11+ for the small setup utility.
+From the repository root:
 
-**Geospatial validation**
-
-Service availability is validated against a phase-based zone system. Phase 1 covers specific streets in Minsk. Address coordinates are stored as PostGIS POINT geometry with GiST indexes for fast spatial queries. Street names are validated against an allowlist before an order can be placed.
-
-**Role-based access**
-
-| Role | Access |
-|------|--------|
-| CLIENT | Create orders, manage addresses, buy subscriptions, rate couriers |
-| COURIER | Accept orders, manage shifts, update delivery status (requires phone verification) |
-| ADMIN | Full platform management — users, orders, payments, analytics, courier verification |
-
-**Background jobs (Celery Beat)**
-
-- Every 5 minutes: auto-cancel expired unaccepted orders
-- Every hour: deactivate expired subscriptions and notify users
-
-**Telegram notifications**
-
-Celery tasks send Telegram messages on key events: order placed, courier assigned, order completed, application approved/rejected, subscription expiring. Tasks retry up to 3 times with a 60-second delay on failure.
-
-## Project Structure
-
-```
-EcoHaul/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/          # Route handlers (orders, auth, users, admin, ...)
-│   │   ├── core/            # Config, database, security, Redis
-│   │   ├── models/          # SQLAlchemy ORM models
-│   │   ├── schemas/         # Pydantic request/response schemas
-│   │   ├── services/        # Payment providers, verification
-│   │   ├── tasks/           # Celery tasks (notifications, orders, subscriptions)
-│   │   ├── telegram/        # aiogram bot and handlers
-│   │   └── websocket/       # WebSocket connection manager and routes
-│   ├── migrations/          # Alembic migration files
-│   ├── tests/               # pytest test suite
-│   ├── scripts/             # Dev utilities
-│   └── pyproject.toml
-├── frontend/
-│   ├── src/
-│   │   ├── pages/           # client/, courier/, admin/
-│   │   ├── contexts/        # AuthContext (Telegram auth flow)
-│   │   ├── shared/          # Components, hooks, types
-│   │   ├── lib/api/         # Axios API clients per domain
-│   │   └── store/           # Zustand stores
-│   └── vite.config.ts
-└── docker/
-    ├── docker-compose.yml
-    ├── Dockerfile.backend
-    ├── Dockerfile.frontend
-    └── nginx.conf
-```
-
-## Running with Docker
-
-**1. Clone the repository**
-
-```bash
+```sh
 git clone https://github.com/br1maks/EcoHaul.git
 cd EcoHaul
+python scripts/setup_local.py
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build --wait
 ```
 
-**2. Configure environment**
+| Open | Address |
+| --- | --- |
+| Application | http://localhost:8080 |
+| Interactive API documentation | http://localhost:8001/api/docs |
+| Dependency readiness | http://localhost:8001/health |
 
-```bash
-cp .env.example .env
+Migrations run automatically before the API starts. The setup utility generates local
+secrets and enables API documentation; Telegram and development authentication stay
+disabled. No bot or merchant credentials are needed to inspect the API and admin UI.
+
+To create a local administrator:
+
+```sh
+docker compose --env-file .env -f docker/docker-compose.yml exec backend python scripts/create_admin.py --email admin@example.test
 ```
 
-Edit `.env` and fill in the required values (database password, secret key, Telegram bot token, YooKassa credentials).
+Enter a password when prompted, then open `/admin/login` in the application.
+For the client workflow, configure Telegram and launch the Mini App from the bot.
+See [development](docs/development.md) for source-based setup, synthetic demo data and troubleshooting.
 
-**3. Build and start**
+## Quality checks
 
-```bash
-docker compose -f docker/docker-compose.yml up -d --build
-```
-
-**4. Run database migrations**
-
-```bash
-docker compose -f docker/docker-compose.yml exec backend alembic upgrade head
-```
-
-**5. Verify**
-
-```bash
-curl http://localhost:8001/health
-# {"status":"healthy","database":"connected","phase":1}
-```
-
-The API is available at `http://localhost:8001`, the frontend at `http://localhost`.
-
-## Running Locally (Development)
-
-**Backend**
-
-```bash
+```sh
+# Backend unit tests; no services required
 cd backend
-python -m venv venv && source venv/bin/activate
-pip install poetry && poetry install
-uvicorn app.main:app --reload --port 8001
+poetry install --no-root
+poetry run pytest -q
+
+# Frontend
+cd ../frontend
+npm ci
+npm run lint -- --max-warnings 0
+npm run build
 ```
 
-**Celery worker** (in a separate terminal)
+PostgreSQL integration tests are opt-in: start the isolated test services and run
+`poetry run pytest --integration -q`. The [testing guide](docs/development.md#postgresql--redis-integration-tests)
+explains the fixed disposable test database and ports. Telegram/payment delivery is
+mocked in tests; PostgreSQL transactions and Redis are real.
 
-```bash
-cd backend && source venv/bin/activate
-celery -A app.celery_app worker --loglevel=info
+## Project map
+
+```text
+backend/
+  app/api/v1/       HTTP endpoints and access control
+  app/core/         Settings, sessions, security, Redis
+  app/models/       SQLAlchemy models and relations
+  app/schemas/      Pydantic contracts
+  app/services/     External integrations
+  app/tasks/        Background and scheduled jobs
+  app/websocket/    Connections and event payloads
+  migrations/      Alembic schema history
+  tests/           Unit and PostgreSQL integration tests
+frontend/src/
+  lib/api/         Authenticated HTTP and WebSocket clients
+  pages/           Client, courier and admin interfaces
+  shared/          Components and domain types
+  store/           Zustand state
+scripts/           Local setup, OpenAPI export, synthetic demo data
+docker/            Images, Nginx and Compose configurations
+docs/              Architecture, API, development and security
 ```
 
-**Frontend**
+## Scope and next steps
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+This is a portfolio application with explicit deployment boundaries. WebSocket delivery
+currently uses a single-process connection registry; notification dispatch is best effort;
+refresh sessions do not yet have server-side revocation. The next architectural steps
+are an outbox, distributed event fan-out and refresh-session management.
 
-Vite proxies `/api` requests to `http://localhost:8001`, so no CORS configuration is needed during development.
+Keeping these tradeoffs explicit makes the implementation easier to inspect and extend.
+See [architecture](docs/architecture.md) and [security](docs/security.md) for the reasoning.
 
-## Environment Variables
+---
 
-| Variable | Description |
-|----------|-------------|
-| `POSTGRES_PASSWORD` | PostgreSQL password |
-| `DATABASE_URL` | Async DB URL (`postgresql+asyncpg://...`) |
-| `DATABASE_URL_SYNC` | Sync DB URL for Alembic migrations |
-| `SECRET_KEY` | JWT signing key (`openssl rand -hex 32`) |
-| `BOT_TOKEN` | Telegram bot token |
-| `WEBAPP_URL` | Public URL for the Mini App |
-| `YOOKASSA_SHOP_ID` | YooKassa shop identifier |
-| `YOOKASSA_SECRET_KEY` | YooKassa secret key |
-| `REDIS_URL` | Redis connection URL |
-
-See `.env.example` for the full list.
-
-## API Overview
-
-The REST API is versioned under `/api/v1`. All authenticated endpoints require a Bearer token.
-
-| Domain | Base path |
-|--------|-----------|
-| Auth | `/api/v1/auth` |
-| Users | `/api/v1/users` |
-| Orders | `/api/v1/orders` |
-| Addresses | `/api/v1/addresses` |
-| Subscriptions | `/api/v1/subscriptions` |
-| Payments | `/api/v1/payments` |
-| Courier shifts | `/api/v1/courier-shifts` |
-| Courier applications | `/api/v1/courier-applications` |
-| Reviews | `/api/v1/reviews` |
-| Notifications | `/api/v1/notifications` |
-| Service zones | `/api/v1/service-zones` |
-| Admin | `/api/v1/admin` |
-| WebSocket | `/api/v1/ws` |
-
-Interactive API documentation is available at `http://localhost:8001/docs` when the backend is running.
-
-## Authentication
-
-Clients authenticate via Telegram's initData mechanism. The backend validates the HMAC-SHA256 signature of the Mini App launch parameters against the bot token — no passwords or OAuth flows for regular users.
-
-Admins authenticate with email and password through a separate endpoint.
-
-Both flows issue short-lived JWT access tokens (15 minutes) and long-lived refresh tokens (7 days). The frontend automatically refreshes access tokens on 401 responses.
-
-## Tests
-
-```bash
-cd backend
-pytest tests/ -v
-```
-
-The test suite uses a dedicated PostgreSQL database (`ecohaul_test`) and requires `TEST_DB_PASSWORD` and optionally `TEST_DB_HOST` to be set. The database schema is recreated before each test session; individual tables are truncated between tests.
+**Кратко по-русски:** сервис вывоза мусора через Telegram Mini App с интерфейсами клиента,
+курьера и администратора. Основной акцент — FastAPI, транзакции PostgreSQL, права доступа,
+фоновые задачи, тесты и воспроизводимый запуск. Интерфейс приложения — на русском языке.

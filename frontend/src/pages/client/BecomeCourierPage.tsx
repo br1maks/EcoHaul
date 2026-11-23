@@ -1,3 +1,4 @@
+import { errorDetail } from '@/lib/api/errors';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -100,9 +101,9 @@ export const BecomeCourierPage = () => {
 
       const application = await courierApplicationsApi.create(data);
       setExistingApplication(application);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to submit application:', err);
-      const detail = err.response?.data?.detail;
+      const detail = errorDetail(err);
       if (detail) {
         alert(detail);
       } else {

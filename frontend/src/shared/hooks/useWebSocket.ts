@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { wsManager } from '@/lib/api/websocket';
 import { getAccessToken } from '@/lib/api/auth';
@@ -6,17 +6,26 @@ import { useNotificationsStore } from '@/store/notifications.store';
 import { fetchNotifications } from '@/lib/api/notifications';
 
 export const useWebSocket = () => {
+    const [token, setToken] = useState(getAccessToken);
+    useEffect(() => {
+        const update = () => setToken(getAccessToken());
+        window.addEventListener('ecohaul:auth', update);
+        return () => window.removeEventListener('ecohaul:auth', update);
+    }, []);
     const addNotification = useNotificationsStore((state) => state.addNotification);
     const setNotifications = useNotificationsStore((state) => state.setNotifications);
 
     useEffect(() => {
+        if (!token) {
+            setNotifications([]);
+            return;
+        }
         fetchNotifications()
             .then((data) => setNotifications(data))
             .catch(() => {});
-    }, [setNotifications]);
+    }, [setNotifications, token]);
 
     useEffect(() => {
-        const token = getAccessToken();
         if (!token) return;
 
         wsManager.connect(token);
@@ -110,5 +119,5 @@ export const useWebSocket = () => {
             unsubNotif();
             wsManager.disconnect();
         };
-    }, [addNotification]);
+    }, [addNotification, token]);
 };

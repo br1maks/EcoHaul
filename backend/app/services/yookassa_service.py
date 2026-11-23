@@ -1,7 +1,4 @@
 
-import hashlib
-import hmac
-import json
 from typing import Optional, Dict, Any
 from yookassa import Configuration, Payment as YKPayment
 from app.core.config import settings
@@ -73,19 +70,6 @@ class YooKassaService:
         return payment
 
     @staticmethod
-    def verify_webhook_signature(payload: bytes, signature: str) -> bool:
-        if not signature:
-            return False
-
-        expected_signature = hmac.new(
-            key=settings.YOOKASSA_SECRET_KEY.encode('utf-8'),
-            msg=payload,
-            digestmod=hashlib.sha256
-        ).hexdigest()
-
-        return hmac.compare_digest(signature, expected_signature)
-
-    @staticmethod
     def verify_webhook_ip(client_ip: str) -> bool:
         from ipaddress import ip_address, ip_network
 
@@ -94,6 +78,7 @@ class YooKassaService:
             "185.71.77.0/27",
             "77.75.153.0/25",
             "77.75.154.128/25",
+            "2a02:5180::/32",
         ]
 
         allowed_ips = [

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, User, Phone, Mail, Calendar, Package, DollarSign, Loader2, AlertCircle, MessageSquare } from 'lucide-react';
 import { Card } from '@/shared/components/Card';
@@ -14,13 +14,9 @@ export const AdminClientDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (id) {
-      fetchClientData();
-    }
-  }, [id]);
 
-  const fetchClientData = async () => {
+
+  const fetchClientData = useCallback(async () => {
     if (!id) return;
 
     try {
@@ -42,7 +38,13 @@ export const AdminClientDetailPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) {
+      fetchClientData();
+    }
+  }, [id, fetchClientData]);
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Неизвестно';

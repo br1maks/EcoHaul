@@ -68,7 +68,7 @@ export interface CourierStatistics {
   id: string;
   first_name: string;
   last_name: string;
-  phone: string;
+  phone: string | null;
   email: string | null;
   rating: number;
   courier_status: CourierStatus;

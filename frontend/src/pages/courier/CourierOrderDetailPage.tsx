@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -39,7 +39,7 @@ export const CourierOrderDetailPage = ({ orderId, onBack }: CourierOrderDetailPa
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadOrder = async () => {
+  const loadOrder = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -51,13 +51,15 @@ export const CourierOrderDetailPage = ({ orderId, onBack }: CourierOrderDetailPa
     } finally {
       setLoading(false);
     }
-  };
+  }, [orderId]);
 
   useEffect(() => {
     if (orderId) {
       loadOrder();
     }
-  }, [orderId]);
+  }, [orderId, loadOrder]);
+
+
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!order) return;

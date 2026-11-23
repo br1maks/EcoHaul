@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bell, X, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useNotificationsStore } from '@/store/notifications.store';
 import { deleteAllNotifications } from '@/lib/api/notifications';
 
@@ -41,7 +42,8 @@ export const NotificationBell = () => {
     try {
       await deleteAllNotifications();
     } catch {
-      
+      toast.error('Не удалось удалить уведомления');
+      return;
     }
     clearNotifications();
   };

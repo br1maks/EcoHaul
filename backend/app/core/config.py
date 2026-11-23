@@ -14,11 +14,15 @@ class Settings(BaseSettings):
     DESCRIPTION: str = "Сервис вывоза мусора в Минске через Telegram Mini App"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
+    DOCS_ENABLED: bool = False
+    ENABLE_DEV_AUTH: bool = False
+    TELEGRAM_ENABLED: bool = False
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/ecohaul"
     DB_ECHO: bool = False
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
+    DB_USE_NULL_POOL: bool = False
 
     SECRET_KEY: str = "changeme-generate-with-openssl-rand-hex-32"
     ALGORITHM: str = "HS256"

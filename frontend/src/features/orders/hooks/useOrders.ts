@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
-import { ordersApi } from '@/features/orders/api/orders.api';
-import type { Order, CreateOrderData } from '@/shared/types';
+import { ordersApi } from '@/lib/api/orders';
+import { errorDetail } from '@/lib/api/errors';
+import type { Order, CreateOrderData, OrderStatus } from '@/shared/types';
 
 export const useOrders = () => {
     const [orders, setOrders] = useState<Order[]>([]);
@@ -8,17 +9,17 @@ export const useOrders = () => {
     const [error, setError] = useState<string | null>(null);
 
     const fetchOrders = useCallback(async (params?: {
-        status?: string;
+        status?: OrderStatus;
         page?: number;
         page_size?: number;
     }) => {
         try {
             setLoading(true);
             setError(null);
-            const response = await ordersApi.getOrders(params);
+            const response = await ordersApi.getOrders({ status_filter: params?.status, page: params?.page, size: params?.page_size });
             setOrders(response.items);
-        } catch (err: any) {
-            setError(err.detail || 'Ошибка загрузки заказов');
+        } catch (err: unknown) {
+            setError(errorDetail(err) || 'Ошибка загрузки заказов');
         } finally {
             setLoading(false);
         }
@@ -31,8 +32,8 @@ export const useOrders = () => {
             const order = await ordersApi.createOrder(data);
             setOrders((prev) => [order, ...prev]);
             return order;
-        } catch (err: any) {
-            setError(err.detail || 'Ошибка создания заказа');
+        } catch (err: unknown) {
+            setError(errorDetail(err) || 'Ошибка создания заказа');
             throw err;
         } finally {
             setLoading(false);
@@ -48,8 +49,8 @@ export const useOrders = () => {
                 prev.map((o) => (o.id === id ? order : o))
             );
             return order;
-        } catch (err: any) {
-            setError(err.detail || 'Ошибка отмены заказа');
+        } catch (err: unknown) {
+            setError(errorDetail(err) || 'Ошибка отмены заказа');
             throw err;
         } finally {
             setLoading(false);

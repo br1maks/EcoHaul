@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from uuid import UUID
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -115,6 +116,10 @@ async def refresh_tokens(
             detail="Невалидный токен",
         )
 
+    try:
+        user_id = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=401, detail="Невалидный токен")
     stmt = select(User).where(User.id == user_id)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
@@ -139,7 +144,7 @@ async def test_auth(
     data: TestAuthRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    if not settings.DEBUG:
+    if not (settings.DEBUG and settings.ENABLE_DEV_AUTH):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",
