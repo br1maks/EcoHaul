@@ -1,3 +1,4 @@
+import { errorDetail } from '@/lib/api/errors';
 import { useState, useEffect } from 'react';
 import { X, Search, Star, Check } from 'lucide-react';
 import { couriersApi, type CourierStatistics } from '@/lib/api';
@@ -46,9 +47,9 @@ export const AssignCourierModal = ({ isOpen, onClose, orderId, onSuccess }: Assi
             await couriersApi.assignCourier(orderId, courierId);
             onSuccess();
             onClose();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Failed to assign courier:', err);
-            const message = err?.detail || err?.message || 'Неизвестная ошибка';
+            const message = errorDetail(err) || 'Неизвестная ошибка';
             alert(`Не удалось назначить курьера: ${message}`);
         } finally {
             setAssigning(false);
@@ -57,7 +58,7 @@ export const AssignCourierModal = ({ isOpen, onClose, orderId, onSuccess }: Assi
 
     const filteredCouriers = couriers.filter(courier =>
         `${courier.first_name} ${courier.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        courier.phone.includes(searchQuery)
+        courier.phone?.includes(searchQuery)
     );
 
     if (!isOpen) return null;

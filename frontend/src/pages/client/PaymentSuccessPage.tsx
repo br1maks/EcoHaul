@@ -22,14 +22,14 @@ export const PaymentSuccessPage = () => {
         };
 
         check();
-    }, [paymentId]);
+    }, [paymentId, navigate]);
 
     useEffect(() => {
         if (status === 'success') {
             const timer = setTimeout(() => navigate('/orders'), 3000);
             return () => clearTimeout(timer);
         }
-    }, [status]);
+    }, [status, navigate]);
 
     return (
         <div className="min-h-screen flex items-center justify-center px-4">

@@ -1,77 +1,43 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { authApi, getAccessToken, setTokens } from '@/lib/api/auth';
 
-interface AuthContextType {
-  isReady: boolean;
-}
-
-const AuthContext = createContext<AuthContextType>({ isReady: false });
-
-export const useAuth = () => useContext(AuthContext);
+import { AuthContext } from './auth.context';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [isReady, setIsReady] = useState(false);
-
+  const [state, setState] = useState<'loading' | 'ready' | 'required' | 'error'>('loading');
   useEffect(() => {
-    initAuth();
+    let active = true;
+    async function initialize() {
+      if (window.location.pathname === '/admin/login') {
+        if (active) setState('ready');
+        return;
+      }
+      const tg = window.Telegram?.WebApp;
+      if (tg?.initData) {
+        tg.ready();
+        try {
+          const tokens = await authApi.loginWithTelegram(tg.initData);
+          if (active) { setTokens(tokens.access_token, tokens.refresh_token); setState('ready'); }
+        } catch {
+          if (active) setState('error');
+        }
+      } else if (active) {
+        setState(getAccessToken() ? 'ready' : 'required');
+      }
+    }
+    void initialize();
+    return () => { active = false; };
   }, []);
 
-  const initAuth = async () => {
-    
-    if (window.location.pathname === '/admin/login') {
-      setIsReady(true);
-      return;
-    }
-
-    const tg = window.Telegram?.WebApp;
-
-    if (tg?.initData) {
-      
-      tg.ready();
-      try {
-        const tokens = await authApi.loginWithTelegram(tg.initData);
-        setTokens(tokens.access_token, tokens.refresh_token);
-      } catch (error) {
-        console.error('Ошибка Telegram авторизации:', error);
-      }
-      setIsReady(true);
-      return;
-    }
-
-    if (getAccessToken()) {
-      setIsReady(true);
-      return;
-    }
-
-    try {
-      const tokens = await authApi.loginTest(987654321, 'Admin', 'Dev');
-      setTokens(tokens.access_token, tokens.refresh_token);
-    } catch (error) {
-      console.error('Ошибка тестовой авторизации:', error);
-    }
-
-    setIsReady(true);
-  };
-
-  if (!isReady) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        fontSize: '16px',
-        color: '#666',
-      }}>
-        Загрузка...
+  if (state !== 'ready') return (
+    <main className="min-h-screen flex items-center justify-center p-6 bg-green-50">
+      <div className="max-w-sm text-center space-y-4">
+        <h1 className="text-3xl font-bold text-green-800">EcoHaul</h1>
+        <p>{state === 'loading' ? 'Подключаемся…' : state === 'error' ? 'Не удалось войти. Откройте приложение заново через Telegram.' : 'Откройте приложение через Telegram, чтобы оформить вывоз.'}</p>
+        {state !== 'loading' && <a className="inline-block text-green-800 underline" href="/admin/login">Вход для администратора</a>}
       </div>
-    );
-  }
-
-  return (
-    <AuthContext.Provider value={{ isReady }}>
-      {children}
-    </AuthContext.Provider>
+    </main>
   );
+  return <AuthContext.Provider value={{ isReady: true }}>{children}</AuthContext.Provider>;
 };

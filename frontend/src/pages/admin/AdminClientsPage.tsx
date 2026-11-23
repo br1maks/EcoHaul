@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, User, Package, DollarSign, Calendar, Loader2, AlertCircle } from 'lucide-react';
 import { Card } from '@/shared/components/Card';
@@ -15,11 +15,9 @@ export const AdminClientsPage = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  useEffect(() => {
-    fetchClients();
-  }, [page]);
 
-  const fetchClients = async () => {
+
+  const fetchClients = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -35,11 +33,15 @@ export const AdminClientsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page]);
+
+  useEffect(() => {
+    fetchClients();
+  }, [fetchClients]);
 
   const filteredClients = clients.filter(client =>
     `${client.first_name} ${client.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    client.phone.includes(searchQuery) ||
+    client.phone?.includes(searchQuery) ||
     (client.email && client.email.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 

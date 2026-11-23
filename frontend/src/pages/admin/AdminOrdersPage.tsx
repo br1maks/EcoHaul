@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Search, ChevronRight, Package, Loader2, AlertCircle } from 'lucide-react';
 import { Card } from '@/shared/components/Card';
 import { Badge } from '@/shared/components/Badge';
 import { Input } from '@/shared/components/Input';
 import { useNavigate } from 'react-router-dom';
-import { ordersApi, type OrderListResponse, type GarbageType } from '@/lib/api';
+import { ordersApi, type OrderListResponse, type GarbageType, type OrderStatus } from '@/lib/api';
 
 export const AdminOrdersPage = () => {
   const navigate = useNavigate();
@@ -16,21 +16,19 @@ export const AdminOrdersPage = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [statusFilter, currentPage]);
 
-  const fetchOrders = async () => {
+
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const params: any = {
+      const params: { page: number; size: number; status_filter?: OrderStatus } = {
         page: currentPage,
         size: 20,
       };
 
       if (statusFilter !== 'all') {
-        params.status_filter = statusFilter;
+        params.status_filter = statusFilter as OrderStatus;
       }
 
       const orders = await ordersApi.getAllOrders(params);
@@ -41,7 +39,11 @@ export const AdminOrdersPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, currentPage]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { label: string; className: string }> = {

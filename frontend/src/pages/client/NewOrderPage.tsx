@@ -1,6 +1,7 @@
+import { errorDetail } from '@/lib/api/errors';
 import { useState, useEffect } from 'react';
 import { addressesApi } from '@/lib/api/addresses';
-import { ordersApi } from '@/features/orders/api/orders.api';
+import { ordersApi } from '@/lib/api/orders';
 import { geocodeAddress, type GeocodeResult } from '@/lib/api/geocoding';
 import type { GarbageType, Address } from '@/shared/types';
 import { Button, Input, Card } from '@/shared/components';
@@ -113,7 +114,7 @@ export const NewOrderPage = ({ onBack, onSuccess }: NewOrderPageProps) => {
     if (isToday && (h < minTimeToday.h || (h === minTimeToday.h && m < minTimeToday.m))) {
       setScheduledTime('');
     }
-  }, [scheduledDate]);
+  }, [scheduledDate, scheduledTime, isToday, minTimeToday.h, minTimeToday.m]);
 
   useEffect(() => {
     const loadAddresses = async () => {
@@ -215,9 +216,9 @@ export const NewOrderPage = ({ onBack, onSuccess }: NewOrderPageProps) => {
       setNewApartment('');
       setNewEntrance('');
       setNewFloor('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to create address:', err);
-      setError(err.response?.data?.detail || 'Ошибка создания адреса');
+      setError(errorDetail(err) || 'Ошибка создания адреса');
     } finally {
       setSavingAddress(false);
     }
@@ -264,9 +265,9 @@ export const NewOrderPage = ({ onBack, onSuccess }: NewOrderPageProps) => {
       setTimeout(() => {
         onSuccess?.();
       }, 1500);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to create order:', err);
-      setError(err.response?.data?.detail || 'Ошибка создания заказа');
+      setError(errorDetail(err) || 'Ошибка создания заказа');
     } finally {
       setLoading(false);
     }

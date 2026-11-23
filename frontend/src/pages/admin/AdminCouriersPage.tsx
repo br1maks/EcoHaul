@@ -49,7 +49,7 @@ export const AdminCouriersPage = () => {
     const query = searchQuery.toLowerCase();
     const matchesSearch =
       fullName.includes(query) ||
-      courier.phone.includes(query) ||
+      courier.phone?.includes(query) ||
       (courier.email && courier.email.toLowerCase().includes(query));
 
     const matchesStatus =

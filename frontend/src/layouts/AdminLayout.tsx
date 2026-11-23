@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { usersApi } from '@/lib/api/users';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { LayoutDashboard, Package, Users, UserCheck, BarChart3, Menu, FileText } from 'lucide-react';
 import { ADMIN_ROUTES } from '@/constants/routes.constants';
@@ -13,6 +14,10 @@ export const AdminLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [email, setEmail] = useState('');
+  useEffect(() => {
+    usersApi.getMe().then(user => setEmail(user.email ?? '')).catch(() => setEmail(''));
+  }, []);
 
   const navItems: NavItem[] = [
     {
@@ -115,7 +120,7 @@ export const AdminLayout = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-gray-900">Администратор</div>
-                <div className="text-xs text-gray-500 truncate">admin@ecohaul.by</div>
+                <div className="text-xs text-gray-500 truncate">{email}</div>
               </div>
             </div>
           </div>

@@ -112,7 +112,7 @@ export const AdminCourierApplicationsPage = () => {
     }
   };
 
-  const getTransportIcon = (type?: string) => {
+  const getTransportIcon = (type?: string | null) => {
     switch (type) {
       case 'car': return <Car className="w-4 h-4" />;
       case 'bike': return <Bike className="w-4 h-4" />;
@@ -121,7 +121,7 @@ export const AdminCourierApplicationsPage = () => {
     }
   };
 
-  const getTransportLabel = (type?: string) => {
+  const getTransportLabel = (type?: string | null) => {
     switch (type) {
       case 'car': return 'Автомобиль';
       case 'bike': return 'Велосипед';
