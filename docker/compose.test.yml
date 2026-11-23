@@ -10,7 +10,7 @@ services:
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ecohaul_test"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d ecohaul_test"]
       interval: 3s
       timeout: 3s
       retries: 20
