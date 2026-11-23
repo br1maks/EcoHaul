@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     DESCRIPTION: str = "Сервис вывоза мусора в Минске через Telegram Mini App"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
+    DOCS_ENABLED: bool = False
+    ENABLE_DEV_AUTH: bool = False
+    TELEGRAM_ENABLED: bool = False
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/ecohaul"
     DB_ECHO: bool = False

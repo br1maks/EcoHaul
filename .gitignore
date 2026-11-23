@@ -10,8 +10,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -27,7 +27,7 @@ env/
 .venv
 
 # Poetry
-poetry.lock
+# Commit poetry.lock for reproducible dependency installs.
 
 # IDEs
 .vscode/
@@ -72,3 +72,7 @@ ADMIN_CREDENTIALS.md
 # OS
 Thumbs.db
 .DS_Store
+
+# JavaScript tooling
+node_modules/
+*.tsbuildinfo

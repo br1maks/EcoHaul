@@ -155,10 +155,6 @@ class Payment(Base, IDMixin, TimestampMixin):
         ]
 
     @property
-    def used_wallet(self) -> bool:
-        return self.payment_method == PaymentMethod.WALLET
-
-    @property
     def used_card(self) -> bool:
         return self.payment_method == PaymentMethod.CARD
 

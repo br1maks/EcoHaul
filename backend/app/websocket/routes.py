@@ -6,6 +6,8 @@ from jose import jwt, JWTError
 
 from app.core.config import settings
 from app.websocket.connection_manager import manager
+from app.core.database import async_session_maker
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,12 @@ async def get_current_user_from_token(token: str) -> UUID:
         if user_id_str is None:
             raise ValueError("Invalid token payload: missing user_id")
         
-        return UUID(user_id_str)
+        user_id = UUID(user_id_str)
+        async with async_session_maker() as db:
+            user = await db.get(User, user_id)
+            if user is None or not user.is_active:
+                raise ValueError("User is unavailable")
+        return user_id
 
     except JWTError as e:
         logger.error(f"JWT decode error: {e}")

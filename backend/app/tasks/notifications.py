@@ -12,6 +12,9 @@ def _get_bot() -> Bot:
 
 @celery_app.task(bind=True, max_retries=3)
 def notify_user(self, telegram_id: int, text: str) -> None:
+    if not settings.TELEGRAM_ENABLED:
+        logger.debug("Telegram delivery disabled")
+        return
     async def _send():
         bot = _get_bot()
         try:

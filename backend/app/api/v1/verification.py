@@ -80,7 +80,7 @@ async def send_verification_code_test(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not settings.DEBUG:
+    if not (settings.DEBUG and settings.ENABLE_DEV_AUTH):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not found",

@@ -61,9 +61,9 @@ class YooKassaProvider(PaymentProvider):
         }
 
     def verify_webhook(self, payload: Dict[str, Any], signature: str) -> bool:
-        import json
-        payload_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
-        return self.service.verify_webhook_signature(payload_bytes, signature)
+        # The provider's authenticated API is the source of truth, not a custom HMAC.
+        remote = self.service.get_payment_info(payload["object"]["id"])
+        return remote.status == payload["object"].get("status")
 
     def create_refund(
         self,

@@ -134,7 +134,7 @@ def verify_telegram_auth_date(init_data: str, max_age_seconds: int = 86400) -> b
         auth_date = int(auth_date_str)
         current_time = int(datetime.now(timezone.utc).timestamp())
 
-        return (current_time - auth_date) <= max_age_seconds
+        return 0 <= (current_time - auth_date) <= max_age_seconds
 
     except (ValueError, TypeError):
         return False

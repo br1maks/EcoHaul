@@ -1,12 +1,15 @@
 from uuid import UUID
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import String, Text, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, IDMixin, TimestampMixin
 from .enums import CourierApplicationStatus
+
+if TYPE_CHECKING:
+    from .user import User
 
 class CourierApplication(Base, IDMixin, TimestampMixin):
     __tablename__ = "courier_applications"

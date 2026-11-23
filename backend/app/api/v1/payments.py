@@ -1,5 +1,7 @@
 
 import logging
+import asyncio
+from decimal import Decimal
 from typing import Optional, Any, cast
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
@@ -92,6 +94,19 @@ async def create_payment(
                 detail="Тариф подписки должен быть BASIC или PREMIUM"
             )
 
+    else:
+        raise HTTPException(status_code=400, detail="Этот тип платежа нельзя создать через checkout")
+
+    if data.payment_type == PaymentType.ORDER_PAYMENT:
+        expected_amount = Decimal(str(order.final_price))
+    else:
+        if not data.duration_months:
+            raise HTTPException(status_code=400, detail="Укажите длительность подписки")
+        prices = {SubscriptionTier.BASIC: Decimal("5.00"), SubscriptionTier.PREMIUM: Decimal("10.00")}
+        expected_amount = prices[data.subscription_tier] * data.duration_months
+    if Decimal(str(data.amount)) != expected_amount:
+        raise HTTPException(status_code=400, detail="Сумма платежа не соответствует стоимости")
+
     payment = Payment(
         user_id=current_user.id,
         order_id=data.order_id,
@@ -111,7 +126,7 @@ async def create_payment(
     else:
         description = "Оплата"
 
-    return_url = settings.YOOKASSA_RETURN_URL
+    return_url = settings.yookassa_return_url_computed
 
     metadata = {
         "payment_id": str(payment.id),
@@ -127,7 +142,7 @@ async def create_payment(
     try:
         logger.info(f"Calling YooKassa API: amount={data.amount}, save_method={data.save_payment_method}")
 
-        yk_payment_obj: Any = YooKassaService.create_payment(
+        yk_payment_obj: Any = await asyncio.to_thread(YooKassaService.create_payment,
             amount=data.amount,
             description=description,
             return_url=return_url,
@@ -183,7 +198,7 @@ async def create_payment(
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка при создании платежа: {str(e)}"
+            detail="Не удалось создать платёж. Попробуйте позже."
         )
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
@@ -252,31 +267,16 @@ async def yookassa_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    client_ip = request.client.host if request.client else "unknown"
-    logger.info(f"Webhook received from IP: {client_ip}")
-
-    if not settings.DEBUG:
-        if not YooKassaService.verify_webhook_ip(client_ip):
-            logger.warning(f"Webhook rejected: invalid IP {client_ip}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid webhook source IP"
-            )
-
-    body_bytes = await request.body()
-    signature = request.headers.get("X-Webhook-Signature", "")
-
-    if not settings.DEBUG:
-        if not YooKassaService.verify_webhook_signature(body_bytes, signature):
-            logger.warning(f"Webhook rejected: invalid signature")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid webhook signature"
-            )
-
-    body = json.loads(body_bytes.decode('utf-8'))
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(body, dict) or not isinstance(body.get("object"), dict):
+        raise HTTPException(status_code=400, detail="Invalid notification")
 
     event_type = body.get("event")
+    if not isinstance(event_type, str):
+        raise HTTPException(status_code=400, detail="Invalid event type")
     payment_data = body.get("object")
 
     logger.info(f"Webhook event: {event_type}, payment_id={payment_data.get('id') if payment_data else 'N/A'}")
@@ -286,8 +286,27 @@ async def yookassa_webhook(
         return {"status": "error", "message": "No payment data"}
 
     yookassa_payment_id = payment_data.get("id")
-
-    stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
+    if not isinstance(yookassa_payment_id, str) or not yookassa_payment_id:
+        raise HTTPException(status_code=400, detail="Missing payment id")
+    expected_status = {"payment.succeeded": "succeeded", "payment.canceled": "canceled"}.get(event_type)
+    if expected_status is None:
+        return {"status": "event_not_handled"}
+    # YooKassa does not sign notifications using X-Webhook-Signature.
+    # Fetch the current object through the authenticated provider API instead.
+    try:
+        remote = await asyncio.to_thread(YooKassaService.get_payment_info, yookassa_payment_id)
+    except Exception:
+        logger.exception("Could not verify payment notification with provider")
+        raise HTTPException(status_code=502, detail="Payment verification unavailable")
+    if remote.id != yookassa_payment_id or remote.status != expected_status:
+        raise HTTPException(status_code=409, detail="Provider status does not match notification")
+    payment_data = {
+        "id": remote.id, "status": remote.status,
+        "metadata": dict(remote.metadata or {}),
+        "payment_method": {"saved": bool(getattr(remote.payment_method, "saved", False)),
+                           "id": getattr(remote.payment_method, "id", None)},
+    }
+    stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id).with_for_update(of=Payment)
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
 
@@ -295,13 +314,14 @@ async def yookassa_webhook(
         logger.warning(f"Webhook: payment not found for yk_id={yookassa_payment_id}")
         return {"status": "payment_not_found"}
 
-    logger.info(
-        f"Webhook: processing payment_id={payment.id}, "
-        f"user_id={payment.user_id}, current_status={payment.status.value}"
-    )
+    if (Decimal(str(remote.amount.value)) != Decimal(str(payment.amount))
+            or remote.amount.currency != "BYN"
+            or payment_data["metadata"].get("payment_id") != str(payment.id)
+            or payment_data["metadata"].get("user_id") != str(payment.user_id)):
+        raise HTTPException(status_code=409, detail="Provider payment does not match local record")
 
     if payment.status != PaymentStatus.PENDING:
-        logger.info(f"Webhook: payment {payment.id} already processed (status={payment.status.value})")
+        logger.info(f"Webhook: payment {payment.id} already processed (status={payment.status})")
         return {"status": "already_processed"}
 
     if event_type == "payment.succeeded":
@@ -313,6 +333,7 @@ async def yookassa_webhook(
 
         if payment.payment_type == PaymentType.SUBSCRIPTION_PURCHASE:
             logger.info(f"Webhook: processing subscription purchase for payment_id={payment.id}")
+            await db.execute(select(User).where(User.id == payment.user_id).with_for_update(of=User))
             metadata = payment_data.get("metadata", {})
             tier_str = metadata.get("tier")
             duration_months = int(metadata.get("duration_months", 1))
@@ -361,15 +382,7 @@ async def yookassa_webhook(
 
         elif payment.payment_type == PaymentType.ORDER_PAYMENT:
             logger.info(f"Webhook: processing order payment for payment_id={payment.id}")
-            if payment.order_id:
-                order_stmt = select(Order).where(Order.id == payment.order_id)
-                result = await db.execute(order_stmt)
-                order = result.scalar_one_or_none()
-
-                if order:
-                    from app.models.enums import OrderStatus
-                    order.status = OrderStatus.PENDING
-                    logger.info(f"Webhook: order {order.id} status set to PENDING")
+            # Payment settlement does not alter delivery progress.
 
         await db.commit()
 

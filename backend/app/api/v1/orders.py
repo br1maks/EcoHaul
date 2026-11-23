@@ -7,12 +7,11 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from yaml import serialize
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import verify_password
-from app.api.dependencies import get_current_active_user, require_courier, require_admin
+from app.api.dependencies import get_current_active_user, require_courier, require_admin, require_order_operator
 from app.models.user import User
 from app.models.enums import UserRole
 from app.models.order import Order
@@ -158,6 +157,7 @@ async def create_order(
     stmt = select(Subscription).where(
         Subscription.user_id == current_user.id,
         Subscription.is_active == True,
+        Subscription.end_date > now,
     )
 
     result = await db.execute(stmt)
@@ -239,6 +239,7 @@ async def create_order(
             notify_order_created.delay(current_user.telegram_id, str(order.id))
 
     await get_redis().delete("orders:available")
+    await db.refresh(order, ["pickup_address"])
     return order
 
 @router.get("", response_model=OrderListResponse)
@@ -277,11 +278,14 @@ async def get_available_orders(
 
     cached = await redis.get(cache_key)
     if cached:
-        return json.loads(cached)
+        now = datetime.now(timezone.utc)
+        return [item for item in json.loads(cached)
+                if not item.get("expires_at") or datetime.fromisoformat(item["expires_at"]) > now]
     
     stmt = (
         select(Order)
-        .where(Order.status == OrderStatus.PENDING)
+        .where(Order.status == OrderStatus.PENDING,
+               (Order.expires_at.is_(None)) | (Order.expires_at > datetime.now(timezone.utc)))
         .options(selectinload(Order.pickup_address))
         .order_by(Order.priority.desc(), Order.created_at.asc())
     )
@@ -424,7 +428,7 @@ async def accept_orders_bulk(
 
     for order_id in data.order_ids:
         try:
-            stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.pickup_address))
+            stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.pickup_address)).with_for_update(of=Order)
             result = await db.execute(stmt)
             order = result.scalar_one_or_none()
 
@@ -435,7 +439,7 @@ async def accept_orders_bulk(
                 })
                 continue
 
-            if order.status != OrderStatus.PENDING:
+            if order.status != OrderStatus.PENDING or order.is_expired:
                 failed_orders.append({
                     "order_id": str(order_id),
                     "reason": f"Заказ уже в статусе {str(order.status)}"
@@ -533,7 +537,7 @@ async def accept_order(
                 detail="Неверный пароль",
             )
 
-    stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.pickup_address))
+    stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.pickup_address)).with_for_update(of=Order)
     result = await db.execute(stmt)
     order = result.scalar_one_or_none()
 
@@ -542,7 +546,7 @@ async def accept_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Заказ с таким id не найден",
         )
-    if order.status != OrderStatus.PENDING:
+    if order.status != OrderStatus.PENDING or order.is_expired:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Заказ уже назначен или недоступен",
@@ -647,7 +651,7 @@ async def accept_order(
 async def update_order_status(
     order_id: UUID,
     data: OrderStatusUpdate,
-    current_user: User = Depends(require_courier),
+    current_user: User = Depends(require_order_operator),
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy.orm import joinedload
@@ -656,7 +660,7 @@ async def update_order_status(
         joinedload(Order.client),
         joinedload(Order.courier),
         joinedload(Order.pickup_address),
-    ).where(Order.id == order_id)
+    ).where(Order.id == order_id).with_for_update(of=Order)
     result = await db.execute(stmt)
     order = result.unique().scalar_one_or_none()
 
@@ -808,8 +812,9 @@ async def cancel_order(
 
     stmt = select(Order).where(
         Order.id == order_id,
-        Order.client_id == current_user.id
-    )
+    ).with_for_update(of=Order)
+    if current_user.role != UserRole.ADMIN:
+        stmt = stmt.where(Order.client_id == current_user.id)
     result = await db.execute(stmt)
     order = result.scalar_one_or_none()
 
@@ -865,7 +870,7 @@ async def assign_courier_to_order(
 ):
     from sqlalchemy.orm import joinedload
 
-    stmt = select(Order).where(Order.id == order_id)
+    stmt = select(Order).where(Order.id == order_id).with_for_update(of=Order)
     result = await db.execute(stmt)
     order = result.scalar_one_or_none()
 
@@ -875,7 +880,7 @@ async def assign_courier_to_order(
             detail="Заказ не найден",
         )
 
-    if order.status != OrderStatus.PENDING:
+    if order.status != OrderStatus.PENDING or order.is_expired:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Заказ должен быть в статусе PENDING",

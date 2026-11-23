@@ -99,6 +99,8 @@ async def update_address(
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(address, field, value)
+    if "latitude" in update_data or "longitude" in update_data:
+        address.location = f"POINT({address.longitude} {address.latitude})"
 
     await db.commit()
     await db.refresh(address)
