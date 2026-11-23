@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     DB_ECHO: bool = False
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
+    DB_USE_NULL_POOL: bool = False
 
     SECRET_KEY: str = "changeme-generate-with-openssl-rand-hex-32"
     ALGORITHM: str = "HS256"

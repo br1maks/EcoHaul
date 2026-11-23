@@ -516,7 +516,7 @@ export const CourierDashboardPage = () => {
             <div className="flex-1">
               <h3 className="font-semibold text-gray-900 mb-1">Совет</h3>
               <p className="text-sm text-gray-700">
-                Обновляйте статус заказа вовремя — клиенты видят ваше местоположение и время прибытия
+                Обновляйте статус заказа вовремя — клиент сразу увидит, на каком этапе доставка
               </p>
             </div>
           </div>

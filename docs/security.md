@@ -39,9 +39,6 @@ or short JWT secret. Real bot tokens, merchant credentials and private user data
 never be committed. Rotate any real credential that has previously been published:
 removing it from the latest commit does not remove it from Git history.
 
-Historical sandbox scripts with hardcoded database credentials have been removed
-from the current tree. Git history is preserved.
-
 ## Payment notifications
 
 YooKassa notifications are checked by fetching the payment through the authenticated

@@ -74,6 +74,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecohaul
       DATABASE_URL_SYNC: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecohaul
       REDIS_URL: redis://redis:6379/0
+      DB_USE_NULL_POOL: "True"
     command: celery -A app.celery_app worker --loglevel=info
     depends_on:
       migrate:
@@ -93,6 +94,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecohaul
       DATABASE_URL_SYNC: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecohaul
       REDIS_URL: redis://redis:6379/0
+      DB_USE_NULL_POOL: "True"
     command: celery -A app.celery_app beat --loglevel=info
     depends_on:
       - celery

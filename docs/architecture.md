@@ -38,6 +38,11 @@ The current implementation keeps several domain operations in route handlers.
 Extracting transaction-oriented services is a reasonable next step as the domain grows;
 the directory structure does not imply that a separate service layer already exists everywhere.
 
+The API pools asynchronous database connections. Celery workers set
+`DB_USE_NULL_POOL=True`: scheduled tasks create a new event loop per invocation, so
+connections must not be reused across those loops. An integration regression test
+runs the expiration task in two consecutive loops.
+
 ## Main data relationships
 
 ```mermaid
