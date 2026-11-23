@@ -54,6 +54,17 @@ Payment notifications are confirmed through the provider API before local state 
 CI runs backend tests against PostgreSQL/PostGIS and Redis, checks fresh migrations,
 and builds/lints the frontend.
 
+### Technical review guide
+
+| Question | Design and implementation evidence |
+| --- | --- |
+| What happens when two couriers accept the same order? | [State machine, row locks and concurrent-request test](docs/architecture.md#3-order-lifecycle-and-concurrency) |
+| Where does a database transaction end, and what can fail afterward? | [Commit boundaries, payment races and bulk-command semantics](docs/architecture.md#4-transaction-boundaries-and-failure-modes) |
+| Why do the API and Celery use different connection strategies? | [Async sessions, eager loading and event-loop lifetimes](docs/architecture.md#5-async-sessions-and-worker-event-loops) |
+| Which identity and permissions does the server actually trust? | [Telegram validation](docs/security.md#2-telegram-authentication-canonicalization-provenance-and-freshness), [JWT lifecycle](docs/security.md#3-jwt-lifecycle-and-browser-session-behavior) and [object authorization](docs/security.md#4-authorization-is-role--account-state--object-relationship) |
+| Can a forged or repeated payment callback grant access? | [Provider verification, amount checks and settlement idempotency](docs/security.md#6-payment-integrity-and-idempotency) |
+| What must change before adding API workers or stronger delivery guarantees? | [Cache, task acknowledgements, socket fan-out and the proposed outbox](docs/architecture.md#6-cache-jobs-and-realtime-delivery) |
+
 ## Quick start
 
 Requirements: Docker with Compose v2 and Python 3.11+ for the small setup utility.
