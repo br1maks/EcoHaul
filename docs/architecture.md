@@ -72,7 +72,9 @@ erDiagram
     ORDER ||--o{ ORDER_QUEUE : records_acceptance
     ORDER o|--o{ PAYMENT : optional_order_reference
     USER ||--o{ PAYMENT : pays
-    USER ||--o{ SUBSCRIPTION : holds
+    USER ||--o| SUBSCRIPTION : current_entitlement
+    USER ||--o{ AUTH_SESSION : signs_in
+    AUTH_SESSION ||--o{ WEBSOCKET_TICKET : opens_socket
     USER ||--o{ COURIER_SHIFT : works
     USER ||--o{ COURIER_APPLICATION : applies
     ORDER ||--o{ REVIEW : receives
@@ -84,7 +86,9 @@ erDiagram
 | Order ownership and assignment | Separate `client_id` / nullable `courier_id`; UUID identity does not replace access checks |
 | Pickup integrity | Address foreign key uses `RESTRICT`; address soft deletion hides it from new user operations while retaining the row |
 | Financial state | Prices stored as `NUMERIC(10,2)`; checkout validates expected price on the server |
-| Duplicate provider identity | Unique provider payment id; settlement additionally locks the local payment |
+| Payment identity | Unique provider id/key and `(user_id, idempotency_key)`; settlement locks User then Payment |
+| Current entitlement | Unique subscription user_id; purchases update one row and retain Payment history |
+| Session revocation | AuthSession owns current refresh digest; access checks the persisted session |
 | Courier work list | Composite `(courier_id, status)` index supports the matching filter |
 | Client order history | `(client_id, created_at)` index aligns with owner/history access |
 | Pending discovery and expiration | Status/priority and expiry indexes are declared; actual query plans still need measurement |
@@ -92,8 +96,8 @@ erDiagram
 
 See [Order](../backend/app/models/order.py), [Payment](../backend/app/models/payment.py),
 [Address](../backend/app/models/address.py) and [ServiceZone](../backend/app/models/service_zone.py).
-These are schema choices, not benchmark results. Monetary request/calculation paths
-still contain floats, so exact storage alone is not an end-to-end Decimal accounting model.
+These are schema choices, not benchmark results. Order price calculation and checkout use Decimal; response display/analytics still convert
+values to floats. This is not a complete ledger or double-entry accounting system.
 
 Current address admission uses street allowlists; configured phase bounds and stored
 geometry do not establish a universal polygon-based geofence. PostGIS provides a basis
@@ -178,8 +182,10 @@ rollback cannot undo an earlier committed transaction or an external message.
 | Create order | Order and delivery/cache intents commit together | Transport failure does not fail the committed command; unfinished delivery is retried |
 | Accept one order | Locked state, assignment, inbox and outbox rows commit together | Dispatcher only sees committed intents and performs network work outside order locks |
 | Advance order status | Locked transition, applicable counter and notification intents commit together | Rollback removes its events too; transport errors are handled by outbox retries |
-| Create provider payment | Local row is flushed; provider is called; provider id is saved and committed | Provider creation and local persistence cannot share a PostgreSQL transaction |
-| Settle payment callback | Verified payment is locked; payment and applicable subscription effect commit together | Provider lookup occurs first; crash/early-callback races still need reconciliation |
+| Create provider payment | Immutable local intent/key commit first; lease commits before provider call | Unknown result retries the same key; exhausted identity window requires review |
+| Settle provider state | Lock User then Payment; effect and settlement marker commit together | Authenticated lookup precedes locks; callback and scheduled recovery share this path |
+| Rotate refresh session | User/session locks; replace current token digest atomically | Replay revocation commits before returning an authentication error |
+| Issue verification code | Challenge and encrypted Telegram intent commit together | Wrong-attempt budget commits before rejection; delivery is retried by outbox |
 
 `flush()` sends statements and allocates database state inside the transaction; it is
 not a durability boundary. A successful external call cannot be rolled back by SQLAlchemy.
@@ -188,19 +194,17 @@ succeeded; row locking alone does not give request-level idempotency.
 
 ### Payment callbacks: identity, serialization and effect
 
-The webhook handler fetches authoritative state from the merchant API, verifies its id,
-status, amount, currency and local metadata, then locks the local payment. A non-`PENDING`
-record is acknowledged without repeating its effect. For subscription settlement the
-handler additionally locks the user before replacing that user's active subscription.
-This serializes this handler's entitlement changes; it is not a schema-wide guarantee
-that every subscription-writing route enforces the same invariant.
+[Payment recovery](payments.md) persists intent and frozen provider identity before external
+I/O. The shared lifecycle service handles checkout retries, early callbacks and scheduled
+reconciliation. A 60-second lease prevents competing recovery calls; the provider call
+runs outside database locks. Unknown create outcomes reuse the same key for up to 23
+hours, then require review instead of risking a second charge.
 
-The provider id is unique, but checkout does not persist a request idempotency key across
-HTTP retries. Unknown local callback records are acknowledged rather than retained for
-later processing. Reliable recovery would require persisted checkout intent and provider
-reconciliation, not simply more webhook retries. See the full
-[payment trust model](security.md#6-payment-integrity-and-idempotency) and
-[callback tests](../backend/tests/test_webhooks.py).
+Settlement verifies identity/amount/currency/metadata, locks User before Payment, and
+updates the unique current entitlement together with a settlement marker. Existing FREE
+rows are reused rather than inserting another subscription for the same user. Duplicate
+success cannot extend twice. Unknown callback intent returns 503 so it can be retried.
+Tests inject response loss, early callbacks, concurrent checkout and local commit failure.
 
 ### Bulk commands and contention
 
@@ -235,11 +239,15 @@ lifetime model. [The worker regression](../backend/tests/test_worker.py) execute
 expiration task twice in separate loops. SQLAlchemy documents the same
 [multiple-event-loop constraint](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html#using-multiple-asyncio-event-loops).
 
-In the checkout/webhook paths, synchronous merchant SDK calls are wrapped with
-`asyncio.to_thread`. This avoids blocking those async handlers; it does not make the SDK
-transactional or remove provider latency. Other subscription integration paths still
-contain synchronous SDK work and would need the same audit before claiming nonblocking
-external I/O throughout the application.
+All payment creation/lookup paths share a bounded HTTP adapter executed through
+`asyncio.to_thread`; connect/read timeouts are 5/10 seconds and the async wait is bounded
+at 15 seconds. A timed-out await cannot revoke a request already sent to the provider,
+which is why durable idempotency is required. The old parallel SDK adapters were removed.
+
+Persistent attempt budgets use their own committed transactions. Protected callers
+release read-only authentication transactions before reserving a budget, avoiding a
+pool deadlock when each active request would otherwise hold one connection and wait
+for another. A 20-request regression exceeds the default API pool capacity.
 
 ## 6. Cache, jobs and realtime delivery
 
@@ -257,7 +265,8 @@ there is no universal fail-open database fallback in this implementation.
 ### Scheduled work and durable delivery
 
 Celery Beat schedules order expiration every 300 seconds and subscription expiration
-every 3,600 seconds. Tasks use JSON serialization and create outbox rows with their
+every 3,600 seconds; payment reconciliation runs every 120 seconds (20 intents per batch),
+and security-record retention runs daily. Tasks use JSON serialization and create outbox rows with their
 business changes. No current Beat schedule performs recurring subscription charges.
 Default Celery acknowledgement semantics still apply to the scheduled task itself;
 repeat sweeps revisit eligible domain rows, while committed delivery intents remain in
@@ -272,6 +281,9 @@ before delivery commit can still produce a duplicate publication.
 
 ### WebSocket recovery and delivery boundaries
 
+Connections open with a 30-second one-use ticket, strict browser Origin policy and
+periodic session revalidation bounded by original access expiry. See the
+[socket security model](security.md#7-websocket-authentication-and-connection-lifetime).
 Connections remain in memory: use a single API process. The browser deduplicates recent
 `event_id` values, uses persisted inbox ids and refetches authoritative HTTP state after
 reconnect and on periodic visible-tab reconciliation. There is no per-device durable
@@ -316,17 +328,18 @@ or availability targets have been established by load testing.
 | --- | --- | --- |
 | Modular monolith with one relational database | Local transactions for contested state; straightforward debugging and schema evolution | Handler growth calls for explicit application services before distributed boundaries |
 | Pessimistic row locking for claims | Clear winner under contention; state checked while protected | Hold locks briefly; define deadlock retry and bulk ordering policy |
-| Async API and background workers | Request I/O and delayed work have different lifetimes | Async does not remove synchronous SDK work, broker failure or connection limits |
+| Async API and background workers | Request I/O and delayed work have different lifetimes | Async does not remove external latency, broker failure or connection limits |
 | PostgreSQL plus Redis cache | Durable authority and faster repeated discovery are distinct | Cache invalidation may lag; Redis currently shares cache and broker failure impact |
 | Transactional outbox | Domain state and delivery intent commit atomically; retries survive process restart | Duplicate publications remain possible; monitor backlog and retain/clean payloads deliberately |
 | In-memory WebSocket registry | Simple direct delivery in a single API process | Distributed fan-out and connection ownership are prerequisites to multiple API workers |
 | Provider state fetched before settlement | Forged request bodies cannot directly grant entitlements | Provider availability affects callbacks; reconciliation must cover local/provider gaps |
 | PostGIS-backed locations | Typed spatial storage with room for spatial querying | Actual geofencing/routing requires implemented policies, queries and measurements |
 
-A sensible evolution order is: extract transaction-oriented command services; add
-persisted request idempotency; implement payment reconciliation and
-session revocation; then add distributed fan-out and measure bottlenecks before scaling.
-Each step changes an observable guarantee and should gain a matching failure-path test.
+Checkout recovery and session state now have explicit application services. Next steps
+are distributed socket ownership/fan-out, deployment observability, measured query/pool
+capacity, and additional domain-service extraction where route complexity justifies it.
+Do not split the monolith before identifying a boundary that benefits from distribution.
+Every stronger guarantee should have an associated failure-path test.
 
 ## 9. Verification map
 
@@ -335,6 +348,8 @@ Each step changes an observable guarantee and should gain a matching failure-pat
 | Concurrent claims cannot both assign one order | [test_orders.py](../backend/tests/test_orders.py) | Concurrent HTTP requests against real PostgreSQL |
 | Rolled-back commands publish nothing; stream order survives retries | [test_outbox.py](../backend/tests/test_outbox.py) | Real PostgreSQL, injected failures and concurrent dispatchers |
 | Repeated settlement does not repeat the same payment effect | [test_webhooks.py](../backend/tests/test_webhooks.py) | Real database, controlled provider responses |
+| Lost provider response preserves checkout identity | [test_checkout.py](../backend/tests/test_checkout.py) | Real PostgreSQL, controlled provider and injected failures |
+| Refresh replay revokes the session family | [test_sessions.py](../backend/tests/test_sessions.py) | Persisted session and concurrent attempt-budget tests |
 | Worker connections do not cross invocation loops | [test_worker.py](../backend/tests/test_worker.py) | Repeated task execution with separate event loops |
 | Dependency failure changes readiness | [test_health.py](../backend/tests/test_health.py) | Controlled DB/Redis failure probes |
 | Fresh schema and production imports work | [CI workflow](../.github/workflows/ci.yml) | Fresh migration database; backend image without dev dependencies |

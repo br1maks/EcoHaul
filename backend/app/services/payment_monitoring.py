@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.payment import Payment
 from app.models.subscription import Subscription
-from app.models.enums import PaymentStatus, PaymentType
+from app.models.enums import PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -99,14 +99,14 @@ class PaymentMonitoringService:
             "period_hours": hours,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "by_status": {
-                row.status.value: {
+                str(row.status): {
                     "count": row.count,
                     "total_amount": float(row.total_amount or 0)
                 }
                 for row in status_stats
             },
             "by_type": {
-                row.payment_type.value: {
+                str(row.payment_type): {
                     "count": row.count,
                     "total_amount": float(row.total_amount or 0)
                 }
@@ -124,30 +124,18 @@ class PaymentMonitoringService:
 
     @staticmethod
     async def mark_expired_payments(db: AsyncSession) -> int:
+        from app.services.payment_lifecycle import recover_payment, require_payments
+        require_payments()
         threshold = datetime.now(timezone.utc) - timedelta(hours=1)
-
-        stmt = select(Payment).where(
-            and_(
-                Payment.status == PaymentStatus.PENDING,
-                Payment.created_at < threshold
-            )
-        )
-
-        result = await db.execute(stmt)
-        expired_payments = result.scalars().all()
-
-        count = 0
-        for payment in expired_payments:
-            payment.status = PaymentStatus.CANCELLED
-            payment.cancelled_at = datetime.now(timezone.utc)
-            payment.error_message = "Платёж истёк (timeout)"
-            count += 1
-
-        if count > 0:
-            await db.commit()
-            logger.warning(f"Marked {count} expired payments as CANCELLED")
-
-        return count
+        ids = list((await db.scalars(
+            select(Payment.id).where(
+                Payment.status == PaymentStatus.PENDING, Payment.created_at < threshold
+            ).limit(20)
+        )).all())
+        await db.commit()  # do not occupy a connection during independent recovery
+        for payment_id in ids:
+            await recover_payment(payment_id, force=True)
+        return len(ids)
 
     @staticmethod
     async def check_expiring_subscriptions(

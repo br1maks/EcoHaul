@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/shared/components/Card';
 import { Button } from '@/shared/components/Button';
 import { subscriptionsApi } from '@/lib/api/subscriptions';
+import { errorDetail } from '@/lib/api/errors';
 import type { Subscription, SubscriptionPlan, SubscriptionTier } from '@/shared/types';
 
 export const SubscriptionsPage = () => {
@@ -41,7 +42,7 @@ export const SubscriptionsPage = () => {
       window.location.href = response.payment_url;
     } catch (error) {
       console.error('Error purchasing subscription:', error);
-      alert('Ошибка при оформлении подписки');
+      alert(errorDetail(error) ?? 'Ошибка при оформлении подписки');
     } finally {
       setPurchasing(null);
     }

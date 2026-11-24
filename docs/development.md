@@ -155,3 +155,31 @@ environment, or through `docker compose ... exec backend` as shown in the
 [event recovery guide](events.md#6-inspecting-and-recovering-work). Retry preserves event
 identity, explicit discard records abandonment, and purge removes only old terminal rows.
 Configure retention maintenance and alerts for old pending rows before public deployment.
+
+## Payment and session migration rollout
+
+The new chain is `b47a2f019e60` → `c6a209e741db` (durable payments) → `d8c309ab7f02`
+(revocable sessions, code digests and one-use socket tickets). Apply `alembic upgrade head`
+using the normal one-shot migration service, after a backup and with old writers stopped.
+Deploy matching frontend/backend together: checkout now requires Idempotency-Key and
+WebSocket authentication uses tickets instead of a JWT query parameter.
+
+Existing stateless JWTs have no persisted session and require fresh sign-in. Outstanding
+plaintext codes are deliberately marked used before their plaintext column is dropped.
+Completed legacy payments receive a settlement marker so effects are not granted again;
+legacy pending rows without frozen request/known provider identity need manual review.
+Tested rollout includes a fresh chain, populated pre-change rows, downgrade to the outbox
+revision and re-upgrade. Downgrade invalidates codes and removes new session/recovery
+state; it cannot undo a real provider operation. Do not treat schema rollback as financial
+rollback. Telegram code ids stay bigint on downgrade to avoid truncating 64-bit ids.
+
+New administrator passwords require 15–512 characters. Synthetic development auth remains
+explicitly isolated and is not a password-policy bypass to expose on a public host.
+PAYMENTS_ENABLED defaults to False; existing environments must opt in after merchant
+credentials/currency, worker/Beat, callbacks and recovery are validated. The current
+integration suite mocks provider traffic, so it cannot validate a live merchant account.
+
+The session UI appears in client/courier profiles and the admin session panel. It lists
+current/other sessions and supports individual revocation, logout and logout-all. A
+purposeful logout suppresses automatic Telegram re-entry until an explicit sign-in.
+See [security](security.md) for token lifetime, rate budgets, code protection and retention.

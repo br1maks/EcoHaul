@@ -1,5 +1,5 @@
 import asyncio
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -86,7 +86,7 @@ async def test_customer_cannot_read_other_customers_data(client):
 async def test_checkout_rejects_customer_supplied_price(client):
     customer = await login(client, 15001)
     order, _ = await order_for(client, customer)
-    response = await client.post('/api/v1/payments', headers=customer, json={
+    response = await client.post('/api/v1/payments', headers={**customer, 'Idempotency-Key': str(uuid4())}, json={
         'payment_type': 'ORDER_PAYMENT', 'order_id': order['id'], 'amount': 0.01,
     })
     assert response.status_code == 400

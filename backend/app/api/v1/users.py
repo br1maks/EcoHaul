@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import hash_password
+from app.services.sessions import revoke_user_sessions
 from app.api.dependencies import get_current_active_user, require_admin
 from app.models.user import User
 from app.models.enums import UserRole, CourierStatus
@@ -39,7 +40,7 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=20)
     email: Optional[str] = Field(None, max_length=255)
     age: Optional[int] = Field(None, ge=14, le=120)
-    password: Optional[str] = Field(None, min_length=4, max_length=72, description="Пароль для подтверждения взятия заказов (только для курьеров)")
+    password: Optional[str] = Field(None, min_length=15, max_length=512, description="Новый пароль: от 15 до 512 символов")
     courier_status: Optional[CourierStatus] = Field(None, description="Статус курьера (только для курьеров)")
 
 class AdminUserUpdate(BaseModel):
@@ -78,7 +79,11 @@ async def update_me(
 
     if "password" in update_data:
         password = update_data.pop("password")
+        if password is None:
+            raise HTTPException(status_code=422, detail="Укажите пароль")
         current_user.password_hash = hash_password(password)
+        await db.flush()
+        await revoke_user_sessions(db, current_user.id)
 
     for field, value in update_data.items():
         setattr(current_user, field, value)
@@ -136,6 +141,9 @@ async def update_user_by_admin(
     for field, value in update_data.items():
         setattr(user, field, value)
 
+    if update_data.get("is_active") is False:
+        await db.flush()
+        await revoke_user_sessions(db, user.id)
     await db.commit()
     await db.refresh(user)
     return user

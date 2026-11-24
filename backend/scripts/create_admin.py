@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import select
 from app.core.database import async_session_maker
 from app.core.security import hash_password
+from app.services.sessions import revoke_user_sessions
 from app.models.user import User
 from app.models.enums import UserRole
 
@@ -22,12 +23,16 @@ async def create_admin(email: str, password: str, first_name: str, last_name: st
             if existing.role == UserRole.ADMIN:
                 print(f"Администратор с email {email} уже существует.")
                 existing.password_hash = hash_password(password)
+                await db.flush()
+                await revoke_user_sessions(db, existing.id)
                 await db.commit()
                 print("Пароль обновлён.")
             else:
                 existing.role = UserRole.ADMIN
                 existing.email = email
                 existing.password_hash = hash_password(password)
+                await db.flush()
+                await revoke_user_sessions(db, existing.id)
                 await db.commit()
                 print(f"Пользователь {existing.full_name} повышен до ADMIN.")
             return
@@ -69,8 +74,8 @@ def main():
             print("Пароли не совпадают!")
             sys.exit(1)
 
-    if len(password) < 6:
-        print("Пароль должен быть не менее 6 символов!")
+    if not 15 <= len(password) <= 512:
+        print("Пароль должен содержать от 15 до 512 символов!")
         sys.exit(1)
 
     asyncio.run(create_admin(args.email, password, args.first_name, args.last_name))

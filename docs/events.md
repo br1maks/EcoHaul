@@ -195,8 +195,13 @@ exercise duplicate suppression, stale-socket rejection and inbox snapshot races.
 on localhost and checks committed assignment delivery plus `MARK_READ` recovery over HTTP.
 External Telegram sends are replaced in tests; no real recipient is contacted.
 
-The outbox does not add request-level idempotency, payment reconciliation, distributed
-WebSocket routing, durable browser acknowledgements or full session revocation. These
-remain separate features with separate failure models. Scaling beyond one API process
+The outbox does not provide distributed WebSocket routing or durable browser
+acknowledgements. [Checkout idempotency/reconciliation](payments.md) and
+[session revocation](security.md#3-jwt-lifecycle-and-browser-session-behavior) are separate
+implemented protocols with their own failure models. Scaling beyond one API process
 requires explicit connection ownership/fan-out; running several generic dispatchers
 against process-local registries could consume an event on the wrong process.
+
+Verification-code delivery uses encrypted outbox text and a challenge id. The dispatcher
+skips used/expired/superseded challenges before transport; plaintext codes are not stored
+in the delivery snapshot. See [challenge protection](security.md#5-passwords-and-verification-codes).

@@ -10,6 +10,8 @@ from uuid import UUID
 import httpx
 import pytest
 import websockets
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from app.core.security import decode_token
 
 from app.core.database import async_session_maker
 from app.models import Order
@@ -58,12 +60,17 @@ async def test_committed_assignment_reaches_socket_and_read_state_survives_http_
                 customer = await login(http, 31001)
                 courier = await login(http, 31002, "COURIER")
                 order, _ = await order_for(http, customer)
-                token = customer["Authorization"].removeprefix("Bearer ")
-                async with websockets.connect(
-                    f"ws://127.0.0.1:{port}/api/v1/ws?token={token}"
-                ) as ws:
+                ticket_response = await http.post('/api/v1/auth/ws-ticket', headers=customer)
+                assert ticket_response.status_code == 200
+                ticket = ticket_response.json()['ticket']
+                with pytest.raises(InvalidStatus):
+                    await websockets.connect(f"ws://127.0.0.1:{port}/api/v1/ws?ticket={ticket}",
+                                             origin="https://untrusted.example", open_timeout=3)
+                async with websockets.connect(f"ws://127.0.0.1:{port}/api/v1/ws?ticket={ticket}") as ws:
                     connected = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
                     assert connected["type"] == "CONNECTED"
+                    with pytest.raises(InvalidStatus):
+                        await websockets.connect(f"ws://127.0.0.1:{port}/api/v1/ws?ticket={ticket}", open_timeout=3)
                     response = await http.post(
                         f"/api/v1/orders/{order['id']}/accept", headers=courier
                     )
@@ -88,6 +95,12 @@ async def test_committed_assignment_reaches_socket_and_read_state_survives_http_
                                 assert saved["read_at"] is not None
                                 break
                             await asyncio.sleep(0.05)
+                    session_id = decode_token(customer['Authorization'].removeprefix('Bearer '))['sid']
+                    assert (await http.delete('/api/v1/auth/sessions/' + session_id, headers=customer)).status_code == 204
+                    with pytest.raises(ConnectionClosedError) as closed:
+                        await ws.send(json.dumps({'type':'PING'}))
+                        await asyncio.wait_for(ws.recv(), timeout=3)
+                    assert closed.value.rcvd.code == 1008
         finally:
             process.terminate()
             try:

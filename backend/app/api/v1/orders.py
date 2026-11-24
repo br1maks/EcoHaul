@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -104,7 +105,7 @@ class OrderCancel(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)
 
 class OrderAccept(BaseModel):
-    password: str = Field(..., min_length=4, max_length=72, description="Пароль курьера для подтверждения взятия заказа")
+    password: str = Field(..., min_length=1, max_length=512, description="Пароль курьера для подтверждения взятия заказа")
 
 GARBAGE_TYPE_LABELS = {
     "HOUSEHOLD": "Бытовой мусор",
@@ -150,9 +151,9 @@ async def create_order(
             detail="Вывоз доступен только с 08:00 до 21:00",
         )
 
-    price_before_discount = data.number_of_bags * settings.BASE_PRICE_PER_BAG
+    price_before_discount = (data.number_of_bags * Decimal(str(settings.BASE_PRICE_PER_BAG))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    discount_amount = 0.0
+    discount_amount = Decimal("0.00")
     subscription_tier_used = None
 
     stmt = select(Subscription).where(
@@ -168,9 +169,9 @@ async def create_order(
         subscription_tier_used = subscription.tier
 
         if subscription.tier == SubscriptionTier.BASIC:
-            discount_amount = price_before_discount * settings.BASIC_SUBSCRIPTION_DISCOUNT
+            discount_amount = (price_before_discount * Decimal(str(settings.BASIC_SUBSCRIPTION_DISCOUNT))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         elif subscription.tier == SubscriptionTier.PREMIUM:
-            discount_amount = price_before_discount * settings.PREMIUM_SUBSCRIPTION_DISCOUNT
+            discount_amount = (price_before_discount * Decimal(str(settings.PREMIUM_SUBSCRIPTION_DISCOUNT))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     final_price = price_before_discount - discount_amount
 
@@ -393,7 +394,7 @@ async def get_all_orders(
 
 class BulkAcceptOrders(BaseModel):
     order_ids: list[UUID] = Field(..., min_length=1, max_length=10, description="Список ID заказов для взятия (макс 10)")
-    password: str = Field(..., min_length=4, max_length=72, description="Пароль курьера для подтверждения")
+    password: str = Field(..., min_length=1, max_length=512, description="Пароль курьера для подтверждения")
 
 class BulkAcceptResponse(BaseModel):
     accepted_orders: list[OrderResponse] = Field(description="Успешно принятые заказы")

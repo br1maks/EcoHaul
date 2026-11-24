@@ -12,6 +12,7 @@ os.environ['TELEGRAM_ENABLED'] = 'False'
 os.environ['DOCS_ENABLED'] = 'True'
 os.environ['DEBUG'] = 'True'
 os.environ['ENABLE_DEV_AUTH'] = 'True'
+os.environ['PAYMENTS_ENABLED'] = 'True'
 password = quote(os.getenv('TEST_DB_PASSWORD', 'postgres'), safe='')
 host = os.getenv('TEST_DB_HOST', '127.0.0.1')
 port = os.getenv('TEST_DB_PORT', '55432')

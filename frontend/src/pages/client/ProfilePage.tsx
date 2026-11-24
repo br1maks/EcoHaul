@@ -1,3 +1,4 @@
+import { SessionSettings } from '@/shared/components/SessionSettings';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usersApi } from '@/lib/api/users';
@@ -440,6 +441,8 @@ export const ProfilePage = () => {
         </Card>
 
         {}
+        <SessionSettings />
+
         {user.role === 'CLIENT' && (
           <Card
             className="border-2 border-green-100 cursor-pointer hover:shadow-lg transition-shadow"
