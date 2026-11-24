@@ -1,3 +1,4 @@
+from app.services.sessions import revoke_user_sessions
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -696,6 +697,8 @@ async def block_courier(
         )
 
     courier.is_active = False
+    await db.flush()
+    await revoke_user_sessions(db, courier.id)
     await db.commit()
 
     return {"message": "Курьер успешно заблокирован"}

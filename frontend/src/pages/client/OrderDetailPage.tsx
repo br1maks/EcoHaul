@@ -2,6 +2,7 @@ import { useRealtimeRefresh } from '@/shared/hooks/useRealtimeRefresh';
 import { useEffect, useState, useCallback } from 'react';
 import { ordersApi, reviewsApi } from '@/lib/api';
 import { paymentsApi } from '@/lib/api/payments';
+import { errorDetail } from '@/lib/api/errors';
 import type { OrderResponse, Review, CreateReviewData } from '@/shared/types';
 import { Badge } from '@/shared/components/Badge';
 import { Card } from '@/shared/components/Card';
@@ -99,8 +100,8 @@ export const OrderDetailPage = ({ orderId, onBack }: OrderDetailPageProps) => {
         order_id: order.id,
       });
       window.location.href = result.payment_url;
-    } catch {
-      alert('Ошибка при создании платежа');
+    } catch (error) {
+      alert(errorDetail(error) ?? 'Ошибка при создании платежа');
     } finally {
       setPaying(false);
     }

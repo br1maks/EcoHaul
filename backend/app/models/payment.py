@@ -1,8 +1,10 @@
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import String, Numeric, ForeignKey, DateTime, Index, Text
+from sqlalchemy import String, Numeric, ForeignKey, DateTime, Index, Text, Integer, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, IDMixin, TimestampMixin
@@ -42,7 +44,7 @@ class Payment(Base, IDMixin, TimestampMixin):
         nullable=False,
     )
 
-    amount: Mapped[float] = mapped_column(
+    amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )
@@ -84,6 +86,21 @@ class Payment(Base, IDMixin, TimestampMixin):
         nullable=True,
     )
 
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BYN", server_default="BYN")
+    idempotency_key: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True))
+    request_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    checkout_payload: Mapped[Optional[dict]] = mapped_column(JSONB)
+    creation_state: Mapped[str] = mapped_column(String(20), default="LEGACY", server_default="LEGACY")
+    provider_key: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True))
+    provider_key_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    creation_lease: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True))
+    lease_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    confirmation_url: Mapped[Optional[str]] = mapped_column(Text)
+    checkout_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    next_reconcile_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    reconcile_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    settlement_applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     user = relationship(
         "User",
         back_populates="payments",
@@ -92,7 +109,7 @@ class Payment(Base, IDMixin, TimestampMixin):
 
     order = relationship(
         "Order",
-        back_populates="payment",
+        back_populates="payments",
         doc="Заказ за который производится оплата"
     )
 
@@ -111,6 +128,9 @@ class Payment(Base, IDMixin, TimestampMixin):
     )
 
     __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_payment_user_idempotency"),
+        UniqueConstraint("provider_key", name="uq_payment_provider_key"),
+        Index("ix_payment_reconcile", "status", "next_reconcile_at"),
         Index("idx_payment_user_id", "user_id"),
 
         Index("idx_payment_order_id", "order_id"),

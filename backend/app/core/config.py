@@ -1,5 +1,6 @@
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -28,6 +29,10 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    JWT_ISSUER: str = "ecohaul"
+    JWT_AUDIENCE: str = "ecohaul-api"
+    WS_AUTH_CHECK_SECONDS: float = Field(10, gt=0, le=60)
+    TELEGRAM_AUTH_MAX_AGE_SECONDS: int = Field(300, ge=1, le=86400)
 
     BOT_TOKEN: str = "placeholder_bot_token"
     WEBAPP_URL: str = "https://placeholder.com"
@@ -40,6 +45,8 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
 
     PAYMENT_PROVIDER: str = "yookassa"
+    PAYMENTS_ENABLED: bool = False
+    PAYMENT_CURRENCY: str = Field("BYN", pattern=r"^[A-Z]{3}$")
 
     YOOKASSA_SHOP_ID: str = "placeholder_shop_id"
     YOOKASSA_SECRET_KEY: str = "placeholder_secret_key"

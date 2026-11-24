@@ -17,7 +17,7 @@ The React/TypeScript frontend provides a working interface for each role.
 *Administrator dashboard. All screenshots use synthetic demonstration data.*
 [View client, courier and admin screens](docs/screenshots.md).
 
-[Quick start](#quick-start) · [Architecture](docs/architecture.md) · [API guide](docs/api.md) · [Development](docs/development.md) · [Security](docs/security.md)
+[Quick start](#quick-start) · [Architecture](docs/architecture.md) · [API guide](docs/api.md) · [Development](docs/development.md) · [Security](docs/security.md) · [Payment recovery](docs/payments.md)
 
 ## At a glance
 
@@ -34,7 +34,7 @@ The React/TypeScript frontend provides a working interface for each role.
 - **Admin workflow:** inspect clients and couriers, review applications, assign orders and view analytics.
 - **Order coordination:** server-calculated pricing, expiring unaccepted orders and protected state transitions.
 - **Notifications:** authenticated WebSocket updates and optional background Telegram messages.
-- **Subscriptions and checkout:** tiered discounts and a payment-provider adapter with server-side amount validation and verified, idempotent callbacks.
+- **Subscriptions and checkout:** tiered discounts, durable checkout identity, verified settlement and scheduled recovery after provider failures.
 
 Payment integration is demonstrated in code and tests. A live merchant deployment,
 including BYN/country compatibility, is not claimed. Details: [integration boundaries](docs/security.md#before-a-real-deployment).
@@ -48,6 +48,14 @@ and expiration. An integration test races two couriers against the same order.
 cache work alongside domain changes. Failure-injection tests check rollback, retry,
 stream ordering and the crash window that can cause duplicate publication.
 [Delivery model and recovery](docs/events.md).
+
+**Payment uncertainty has a recovery path.** Immutable checkout intent commits before
+provider I/O; retries reuse its key, early callbacks can settle it, and reconciliation
+covers missed notifications. [Failure matrix and operator procedure](docs/payments.md).
+
+**Sessions can be revoked.** Refresh rotation detects replay, password changes invalidate
+old sessions, and sockets use single-use tickets with ongoing checks.
+[Security model and regression evidence](docs/security.md).
 
 **Permissions backed by current data.** JWTs identify a user; authorization checks the
 active database record and required role. Address and payment access is owner-scoped.
@@ -114,6 +122,7 @@ poetry run pytest -q
 cd ../frontend
 npm ci
 npm run lint -- --max-warnings 0
+npm test
 npm run build
 ```
 
@@ -149,8 +158,9 @@ docs/              Architecture, API, development and security
 
 This is a portfolio application with explicit deployment boundaries. WebSocket delivery
 uses a single-process connection registry. Delivery intents are durable and retryable;
-end-user receipt is not exactly once. The next architectural steps are request idempotency,
-payment reconciliation, distributed event fan-out and refresh-session management.
+end-user receipt is not exactly once. Checkout idempotency, scheduled payment recovery and revocable refresh sessions are
+implemented. Further work includes distributed event fan-out, deployment monitoring,
+load measurements and live merchant acceptance.
 
 Keeping these tradeoffs explicit makes the implementation easier to inspect and extend.
 See [architecture](docs/architecture.md) and [security](docs/security.md) for the reasoning.

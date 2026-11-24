@@ -1,25 +1,23 @@
-from datetime import datetime, timezone, timedelta
 import json
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.database import get_db
+from datetime import datetime, timedelta, timezone
+
 from app.api.dependencies import require_admin
-from app.models.user import User
+from app.core.database import get_db
+from app.models.courier_shift import CourierShift
+from app.models.enums import NotificationChannel, NotificationType, OrderStatus
+from app.models.notification import Notification
 from app.models.order import Order
 from app.models.subscription import Subscription
-from app.models.notification import Notification
-from app.models.courier_shift import CourierShift
-from app.models.enums import (
-    OrderStatus,
-    NotificationType,
-    NotificationChannel,
-)
-from app.services.outbox import queue_websocket, invalidate_available_orders
+from app.models.user import User
+from app.services.outbox import invalidate_available_orders, queue_websocket
 from app.websocket.schemas import create_notification_message
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/scheduled-tasks", tags=["Автозадачи"])
+
 
 class TaskResult(BaseModel):
     task_name: str
@@ -28,97 +26,28 @@ class TaskResult(BaseModel):
     message: str
     execution_time_ms: float
 
+
 class ScheduledTasksResult(BaseModel):
     tasks: list[TaskResult]
     total_success: int
     total_failed: int
     total_execution_time_ms: float
 
+
 @router.post("/renew-subscriptions", response_model=TaskResult)
 async def renew_subscriptions_task(
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    start_time = datetime.now()
+    # Saving a method or passing a date is not evidence of a successful charge.
+    return TaskResult(
+        task_name="renew_subscriptions",
+        success=False,
+        processed_count=0,
+        message="Автопродление отключено: подписка меняется только после подтверждённой оплаты",
+        execution_time_ms=0,
+    )
 
-    try:
-        now = datetime.now(timezone.utc)
-
-        stmt = select(Subscription).where(
-            and_(
-                Subscription.is_active.is_(True),
-                Subscription.end_date <= now,
-                Subscription.auto_renew_enabled.is_(True)
-            )
-        )
-
-        stmt = stmt.with_for_update(skip_locked=True, of=Subscription)
-        result = await db.execute(stmt)
-        expired_subscriptions = result.scalars().all()
-
-        renewed_count = 0
-
-        for subscription in expired_subscriptions:
-            user_stmt = select(User).where(User.id == subscription.user_id)
-            user_result = await db.execute(user_stmt)
-            user = user_result.scalar_one_or_none()
-
-            if not user:
-                continue
-
-            subscription.start_date = subscription.end_date
-            subscription.end_date = subscription.end_date + timedelta(days=30)
-            subscription.renewed_count += 1
-
-            subscription.next_billing_date = subscription.end_date
-
-            notification = Notification(
-                user_id=user.id,
-                data=json.dumps({"subscription_id": str(subscription.id)}),
-                notification_type=NotificationType.SUBSCRIPTION_RENEWED,
-                channel=NotificationChannel.IN_APP,
-                title="Подписка продлена",
-                message=f"Ваша подписка \"{subscription.tier}\" успешно продлена до {subscription.end_date.strftime('%d.%m.%Y')}",
-                sent_at=now,
-            )
-            db.add(notification)
-
-            await db.flush()
-
-            ws_message = create_notification_message({
-                "id": notification.id,
-                "title": notification.title,
-                "message": notification.message,
-                "priority": "medium",
-                "created_at": notification.sent_at,
-            })
-            queue_websocket(db, user.id, ws_message)
-
-            renewed_count += 1
-
-        await db.commit()
-
-        execution_time = (datetime.now() - start_time).total_seconds() * 1000
-
-        return TaskResult(
-            task_name="renew_subscriptions",
-            success=True,
-            processed_count=renewed_count,
-            message=f"Продлено {renewed_count} подписок",
-            execution_time_ms=round(execution_time, 2),
-        )
-
-    except Exception as e:
-        await db.rollback()
-        execution_time = (datetime.now() - start_time).total_seconds() * 1000
-
-        return TaskResult(
-            task_name="renew_subscriptions",
-            success=False,
-            processed_count=0,
-            message=f"Ошибка: {str(e)}",
-            execution_time_ms=round(execution_time, 2),
-        )
 
 @router.post("/cleanup-old-orders", response_model=TaskResult)
 async def cleanup_old_orders_task(
@@ -132,10 +61,7 @@ async def cleanup_old_orders_task(
         threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         stmt = select(Order).where(
-            and_(
-                Order.status == OrderStatus.PENDING,
-                Order.created_at <= threshold
-            )
+            and_(Order.status == OrderStatus.PENDING, Order.created_at <= threshold)
         )
 
         stmt = stmt.with_for_update(skip_locked=True, of=Order)
@@ -163,11 +89,12 @@ async def cleanup_old_orders_task(
             await db.flush()
 
             from app.websocket.schemas import create_order_status_message
+
             ws_message = create_order_status_message(
                 order_id=order.id,
                 status="CANCELLED",
                 message=f"Заказ автоматически отменён (не найден курьер)",
-                old_status="PENDING"
+                old_status="PENDING",
             )
             ws_message["data"]["notification_id"] = str(notification.id)
             queue_websocket(db, order.client_id, ws_message, aggregate_key=f"order:{order.id}")
@@ -198,6 +125,7 @@ async def cleanup_old_orders_task(
             execution_time_ms=round(execution_time, 2),
         )
 
+
 @router.post("/notify-expiring-subscriptions", response_model=TaskResult)
 async def notify_expiring_subscriptions_task(
     days_before: int = 3,
@@ -215,7 +143,7 @@ async def notify_expiring_subscriptions_task(
             and_(
                 Subscription.is_active.is_(True),
                 Subscription.end_date >= threshold_start,
-                Subscription.end_date < threshold_end
+                Subscription.end_date < threshold_end,
             )
         )
 
@@ -232,20 +160,22 @@ async def notify_expiring_subscriptions_task(
                 channel=NotificationChannel.IN_APP,
                 title="Подписка заканчивается",
                 message=f"Ваша подписка \"{subscription.tier}\" заканчивается {subscription.end_date.strftime('%d.%m.%Y')}. "
-                        f"{'Подписка будет автоматически продлена.' if subscription.auto_renew_enabled else 'Продлите подписку, чтобы продолжить пользоваться сервисом.'}",
+                f"{'Подписка будет автоматически продлена.' if subscription.auto_renew_enabled else 'Продлите подписку, чтобы продолжить пользоваться сервисом.'}",
                 sent_at=now,
             )
             db.add(notification)
 
             await db.flush()
-            
-            ws_message = create_notification_message({
-                "id": notification.id,
-                "title": notification.title,
-                "message": notification.message,
-                "priority": "high",
-                "created_at": notification.sent_at,
-            })
+
+            ws_message = create_notification_message(
+                {
+                    "id": notification.id,
+                    "title": notification.title,
+                    "message": notification.message,
+                    "priority": "high",
+                    "created_at": notification.sent_at,
+                }
+            )
             queue_websocket(db, subscription.user_id, ws_message)
 
             notified_count += 1
@@ -274,6 +204,7 @@ async def notify_expiring_subscriptions_task(
             execution_time_ms=round(execution_time, 2),
         )
 
+
 @router.post("/send-daily-courier-stats", response_model=TaskResult)
 async def send_daily_courier_stats_task(
     current_user: User = Depends(require_admin),
@@ -289,7 +220,7 @@ async def send_daily_courier_stats_task(
             and_(
                 CourierShift.started_at >= today_start,
                 CourierShift.started_at < today_end,
-                CourierShift.ended_at.isnot(None)
+                CourierShift.ended_at.isnot(None),
             )
         )
 
@@ -300,19 +231,19 @@ async def send_daily_courier_stats_task(
         for shift in today_shifts:
             if shift.courier_id not in courier_stats:
                 courier_stats[shift.courier_id] = {
-                    'shifts': 0,
-                    'orders': 0,
-                    'distance': 0.0,
-                    'hours': 0.0,
+                    "shifts": 0,
+                    "orders": 0,
+                    "distance": 0.0,
+                    "hours": 0.0,
                 }
 
-            courier_stats[shift.courier_id]['shifts'] += 1
-            courier_stats[shift.courier_id]['orders'] += shift.orders_completed
-            courier_stats[shift.courier_id]['distance'] += float(shift.total_distance_km or 0)
+            courier_stats[shift.courier_id]["shifts"] += 1
+            courier_stats[shift.courier_id]["orders"] += shift.orders_completed
+            courier_stats[shift.courier_id]["distance"] += float(shift.total_distance_km or 0)
 
             if shift.ended_at and shift.started_at:
                 duration = (shift.ended_at - shift.started_at).total_seconds() / 3600
-                courier_stats[shift.courier_id]['hours'] += duration
+                courier_stats[shift.courier_id]["hours"] += duration
 
         notified_count = 0
 
@@ -339,13 +270,13 @@ async def send_daily_courier_stats_task(
             ws_message = {
                 "type": "DAILY_STATS",
                 "data": {
-                    "shifts": stats['shifts'],
-                    "orders": stats['orders'],
-                    "hours": round(stats['hours'], 1),
-                    "distance_km": round(stats['distance'], 1),
+                    "shifts": stats["shifts"],
+                    "orders": stats["orders"],
+                    "hours": round(stats["hours"], 1),
+                    "distance_km": round(stats["distance"], 1),
                     "message": message,
                     "date": today_start.strftime("%Y-%m-%d"),
-                }
+                },
             }
             queue_websocket(db, courier_id, ws_message)
 
@@ -375,6 +306,7 @@ async def send_daily_courier_stats_task(
             execution_time_ms=round(execution_time, 2),
         )
 
+
 @router.post("/run-all", response_model=ScheduledTasksResult)
 async def run_all_tasks(
     current_user: User = Depends(require_admin),
@@ -390,7 +322,9 @@ async def run_all_tasks(
     result2 = await cleanup_old_orders_task(hours=24, current_user=current_user, db=db)
     tasks_results.append(result2)
 
-    result3 = await notify_expiring_subscriptions_task(days_before=3, current_user=current_user, db=db)
+    result3 = await notify_expiring_subscriptions_task(
+        days_before=3, current_user=current_user, db=db
+    )
     tasks_results.append(result3)
 
     result4 = await send_daily_courier_stats_task(current_user=current_user, db=db)

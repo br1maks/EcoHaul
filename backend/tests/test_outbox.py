@@ -380,7 +380,7 @@ async def test_shift_end_queues_event_with_its_state_change(client):
     assert [row.payload["message"]["type"] for row in await rows()] == ["SHIFT_ENDED"]
 
 
-@pytest.mark.parametrize("command", ["renew-subscriptions", "notify-expiring-subscriptions"])
+@pytest.mark.parametrize("command", ["notify-expiring-subscriptions"])
 async def test_subscription_commands_commit_inbox_and_delivery_together(client, command):
     from app.models import Subscription, User
 

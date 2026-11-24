@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import String, Integer, BigInteger, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, IDMixin, TimestampMixin
@@ -17,10 +17,10 @@ class VerificationCode(Base, IDMixin, TimestampMixin):
         doc="Пользователь которому принадлежит код"
     )
 
-    code: Mapped[str] = mapped_column(
-        String(6),
+    code_digest: Mapped[str] = mapped_column(
+        String(64),
         nullable=False,
-        doc="6-значный код верификации"
+        doc="HMAC digest bound to the user, purpose and challenge id"
     )
 
     email: Mapped[Optional[str]] = mapped_column(
@@ -31,7 +31,7 @@ class VerificationCode(Base, IDMixin, TimestampMixin):
     )
 
     telegram_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
+        BigInteger,
         nullable=True,
         index=True,
         doc="Telegram ID куда отправлен код (если используется Telegram)"

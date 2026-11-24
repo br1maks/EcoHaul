@@ -170,6 +170,156 @@
         }
       }
     },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/ws-ticket": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Websocket Ticket",
+        "operationId": "websocket_ticket_api_v1_auth_ws_ticket_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSocketTicketResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Logout All",
+        "operationId": "logout_all_api_v1_auth_logout_all_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "List Sessions",
+        "operationId": "list_sessions_api_v1_auth_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Sessions Api V1 Auth Sessions Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "Авторизация"
+        ],
+        "summary": "Revoke Session",
+        "operationId": "revoke_session_api_v1_auth_sessions__session_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/users/me": {
       "get": {
         "tags": [
@@ -1483,15 +1633,32 @@
         ],
         "summary": "Purchase Subscription",
         "operationId": "purchase_subscription_api_v1_subscriptions_purchase_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SubscriptionPurchase"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1499,7 +1666,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SubscriptionPurchaseResponse"
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Pending provider recovery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
                 }
               }
             }
@@ -1514,12 +1691,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/subscriptions/recurring/enable": {
@@ -1540,13 +1712,11 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "409": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubscriptionPurchaseResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -1604,12 +1774,24 @@
             "HTTPBearer": []
           }
         ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PaymentCreateRequest"
+                "$ref": "#/components/schemas/CheckoutRequest"
               }
             }
           }
@@ -1620,7 +1802,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaymentCreateResponse"
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Pending provider recovery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
                 }
               }
             }
@@ -1685,10 +1877,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Фильтр по типу платежа",
               "title": "Payment Type"
-            },
-            "description": "Фильтр по типу платежа"
+            }
           },
           {
             "name": "status_filter",
@@ -1697,16 +1887,14 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/PaymentStatus"
+                  "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Фильтр по статусу",
               "title": "Status Filter"
-            },
-            "description": "Фильтр по статусу"
+            }
           }
         ],
         "responses": {
@@ -1794,6 +1982,64 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payments/{payment_id}/reconcile": {
+      "post": {
+        "tags": [
+          "Админ: Платежи"
+        ],
+        "summary": "Reconcile Payment",
+        "operationId": "reconcile_payment_api_v1_admin_payments__payment_id__reconcile_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Payment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderReference"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -5214,10 +5460,14 @@
         "properties": {
           "email": {
             "type": "string",
+            "maxLength": 254,
+            "minLength": 3,
             "title": "Email"
           },
           "password": {
             "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
             "title": "Password"
           }
         },
@@ -5543,8 +5793,8 @@
           },
           "password": {
             "type": "string",
-            "maxLength": 72,
-            "minLength": 4,
+            "maxLength": 512,
+            "minLength": 1,
             "title": "Password",
             "description": "Пароль курьера для подтверждения"
           }
@@ -5592,6 +5842,126 @@
           "total_failed"
         ],
         "title": "BulkAcceptResponse"
+      },
+      "CheckoutRequest": {
+        "properties": {
+          "payment_type": {
+            "$ref": "#/components/schemas/PaymentType"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 999999.99,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          },
+          "subscription_tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionTier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_months": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 12.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Months"
+          },
+          "save_payment_method": {
+            "type": "boolean",
+            "title": "Save Payment Method",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "payment_type",
+          "amount"
+        ],
+        "title": "CheckoutRequest"
+      },
+      "CheckoutResponse": {
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Payment Id"
+          },
+          "payment_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Url"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "creation_state": {
+            "type": "string",
+            "title": "Creation State"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "payment_id",
+          "payment_url",
+          "amount",
+          "status",
+          "creation_state",
+          "expires_at"
+        ],
+        "title": "CheckoutResponse"
       },
       "ClientStatistics": {
         "properties": {
@@ -6855,8 +7225,8 @@
         "properties": {
           "password": {
             "type": "string",
-            "maxLength": 72,
-            "minLength": 4,
+            "maxLength": 512,
+            "minLength": 1,
             "title": "Password",
             "description": "Пароль курьера для подтверждения взятия заказа"
           }
@@ -7320,101 +7690,6 @@
         ],
         "title": "OverviewStatistics"
       },
-      "PaymentCreateRequest": {
-        "properties": {
-          "payment_type": {
-            "$ref": "#/components/schemas/PaymentType",
-            "description": "Тип платежа"
-          },
-          "amount": {
-            "type": "number",
-            "maximum": 999999.99,
-            "exclusiveMinimum": 0.0,
-            "title": "Amount",
-            "description": "Сумма платежа"
-          },
-          "order_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Order Id",
-            "description": "ID заказа (для ORDER_PAYMENT)"
-          },
-          "subscription_tier": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SubscriptionTier"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Тариф подписки (для SUBSCRIPTION_PURCHASE)"
-          },
-          "duration_months": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 12.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Duration Months",
-            "description": "Длительность подписки в месяцах"
-          },
-          "save_payment_method": {
-            "type": "boolean",
-            "title": "Save Payment Method",
-            "description": "Сохранить способ оплаты для автопродления",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "payment_type",
-          "amount"
-        ],
-        "title": "PaymentCreateRequest"
-      },
-      "PaymentCreateResponse": {
-        "properties": {
-          "payment_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Payment Id"
-          },
-          "payment_url": {
-            "type": "string",
-            "title": "Payment Url"
-          },
-          "amount": {
-            "type": "number",
-            "title": "Amount"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Expires At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "payment_id",
-          "payment_url",
-          "amount",
-          "expires_at"
-        ],
-        "title": "PaymentCreateResponse"
-      },
       "PaymentListResponse": {
         "properties": {
           "items": {
@@ -7615,6 +7890,22 @@
               "123e4567-e89b-12d3-a456-426614174000"
             ]
           },
+          "creation_state": {
+            "type": "string",
+            "title": "Creation State",
+            "default": "LEGACY"
+          },
+          "confirmation_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Url"
+          },
           "is_pending": {
             "type": "boolean",
             "title": "Is Pending"
@@ -7797,6 +8088,23 @@
         ],
         "title": "PeriodStatistics"
       },
+      "ProviderReference": {
+        "properties": {
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          }
+        },
+        "type": "object",
+        "title": "ProviderReference"
+      },
       "RecurringEnableRequest": {
         "properties": {
           "tier": {
@@ -7814,6 +8122,8 @@
         "properties": {
           "refresh_token": {
             "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
             "title": "Refresh Token"
           }
         },
@@ -8245,6 +8555,43 @@
         ],
         "title": "ServiceZoneResponse"
       },
+      "SessionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Used At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "current"
+        ],
+        "title": "SessionResponse"
+      },
       "ShiftDetail": {
         "properties": {
           "id": {
@@ -8513,39 +8860,6 @@
         ],
         "title": "SubscriptionPurchase"
       },
-      "SubscriptionPurchaseResponse": {
-        "properties": {
-          "payment_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Payment Id"
-          },
-          "payment_url": {
-            "type": "string",
-            "title": "Payment Url"
-          },
-          "amount": {
-            "type": "number",
-            "title": "Amount"
-          },
-          "tier": {
-            "$ref": "#/components/schemas/SubscriptionTier"
-          },
-          "duration_months": {
-            "type": "integer",
-            "title": "Duration Months"
-          }
-        },
-        "type": "object",
-        "required": [
-          "payment_id",
-          "payment_url",
-          "amount",
-          "tier",
-          "duration_months"
-        ],
-        "title": "SubscriptionPurchaseResponse"
-      },
       "SubscriptionResponse": {
         "properties": {
           "user_id": {
@@ -8705,6 +9019,8 @@
         "properties": {
           "init_data": {
             "type": "string",
+            "maxLength": 16384,
+            "minLength": 1,
             "title": "Init Data"
           }
         },
@@ -8825,7 +9141,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 72,
+                "maxLength": 512,
                 "minLength": 4
               },
               {
@@ -8850,6 +9166,8 @@
           },
           "refresh_token": {
             "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
             "title": "Refresh Token"
           },
           "token_type": {
@@ -9214,15 +9532,15 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 72,
-                "minLength": 4
+                "maxLength": 512,
+                "minLength": 15
               },
               {
                 "type": "null"
               }
             ],
             "title": "Password",
-            "description": "Пароль для подтверждения взятия заказов (только для курьеров)"
+            "description": "Новый пароль: от 15 до 512 символов"
           },
           "courier_status": {
             "anyOf": [
@@ -9317,8 +9635,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "maxLength": 6,
-            "minLength": 6,
+            "pattern": "^[0-9]{6}$",
             "title": "Code",
             "description": "6-значный код"
           },
@@ -9339,6 +9656,24 @@
           "code"
         ],
         "title": "VerifyCodeRequest"
+      },
+      "WebSocketTicketResponse": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "title": "Ticket"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket",
+          "expires_in"
+        ],
+        "title": "WebSocketTicketResponse"
       },
       "app__api__v1__orders__AddressResponse": {
         "properties": {

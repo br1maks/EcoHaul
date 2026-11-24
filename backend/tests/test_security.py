@@ -56,3 +56,17 @@ def test_tokens_have_distinct_purposes():
     assert access["sub"] == refresh["sub"] == user_id
     assert access["type"] == "access" and refresh["type"] == "refresh"
     assert decode_token("invalid.token") is None
+
+
+def test_new_password_hash_does_not_truncate_long_unicode_input():
+    password = 'я' * 72 + 'one'
+    hashed = hash_password(password)
+    assert verify_password(password, hashed)
+    assert not verify_password('я' * 72 + 'two', hashed)
+
+
+def test_legacy_bcrypt_record_remains_verifiable():
+    import bcrypt
+    legacy = bcrypt.hashpw(b'legacy-password', bcrypt.gensalt()).decode()
+    assert verify_password('legacy-password', legacy)
+    assert not verify_password('wrong', legacy)

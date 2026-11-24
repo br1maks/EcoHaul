@@ -158,10 +158,9 @@ class Order(Base, IDMixin, TimestampMixin, SoftDeleteMixin):
         back_populates="orders",
     )
     
-    payment = relationship(
+    payments = relationship(
         "Payment",
         back_populates="order",
-        uselist=False,
     )
     
     reviews = relationship(

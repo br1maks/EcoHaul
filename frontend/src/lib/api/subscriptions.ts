@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { performCheckout } from './checkout';
 import type { Subscription, SubscriptionPlan, SubscriptionPurchaseData, SubscriptionPurchaseResponse, SubscriptionTier } from '@/shared/types';
 
 export const subscriptionsApi = {
@@ -22,16 +23,16 @@ export const subscriptionsApi = {
    * Купить подписку (разовая покупка)
    */
   purchase: async (data: SubscriptionPurchaseData): Promise<SubscriptionPurchaseResponse> => {
-    const response = await apiClient.post<SubscriptionPurchaseResponse>('/subscriptions/purchase', data);
-    return response.data;
+    const response = await performCheckout('/subscriptions/purchase', { ...data });
+    return { ...response, tier: data.tier, duration_months: data.duration_months };
   },
 
   /**
    * Включить автопродление подписки
    */
   enableAutoRenew: async (tier: SubscriptionTier): Promise<SubscriptionPurchaseResponse> => {
-    const response = await apiClient.post<SubscriptionPurchaseResponse>('/subscriptions/recurring/enable', { tier });
-    return response.data;
+    const response = await performCheckout('/subscriptions/recurring/enable', { tier });
+    return { ...response, tier, duration_months: 1 };
   },
 
   /**

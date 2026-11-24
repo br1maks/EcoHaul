@@ -19,9 +19,19 @@ celery_app.conf.update(
     include=[
         "app.tasks.orders",
         "app.tasks.subscriptions",
+        "app.tasks.payments",
+        "app.tasks.security",
     ],
 
     beat_schedule={
+        "cleanup-security-records": {
+            "task": "app.tasks.security.cleanup_security_records",
+            "schedule": 86400.0,
+        },
+        "reconcile-pending-payments": {
+            "task": "app.tasks.payments.reconcile_payments",
+            "schedule": 120.0,
+        },
         "auto-cancel-expired-orders": {
             "task": "app.tasks.orders.auto_cancel_expired_orders",
             "schedule": 300.0,

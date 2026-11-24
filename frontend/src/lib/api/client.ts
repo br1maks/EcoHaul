@@ -16,23 +16,34 @@ apiClient.interceptors.request.use((request) => {
 apiClient.interceptors.response.use((response) => response, async (error: unknown) => {
   if (!axios.isAxiosError(error)) return Promise.reject(error);
   const request = error.config as RetryConfig | undefined;
-  if (error.response?.status !== 401 || !request || request.retried || request.url?.startsWith('/auth/')) {
+  const noRefresh = ['/auth/refresh', '/auth/admin/login', '/auth/telegram', '/auth/test', '/auth/logout'];
+  if (error.response?.status !== 401 || !request || request.retried || noRefresh.includes(request.url ?? '')) {
     return Promise.reject(error);
   }
   const refreshToken = getRefreshToken();
   if (!refreshToken) return Promise.reject(error);
   request.retried = true;
+  const currentAccess = getAccessToken();
+  if (currentAccess && request.headers.Authorization !== `Bearer ${currentAccess}`) {
+    request.headers.Authorization = `Bearer ${currentAccess}`;
+    return apiClient(request);
+  }
   try {
     if (!refreshing) {
       refreshing = axios.post<Tokens>(`${config.apiUrl}/api/v1/auth/refresh`, { refresh_token: refreshToken }, { timeout: 15000 })
-        .then(({ data }) => { setTokens(data.access_token, data.refresh_token); return data; })
+        .then(({ data }) => {
+          if (getRefreshToken() !== refreshToken) throw new Error('Сессия изменилась во время обновления');
+          setTokens(data.access_token, data.refresh_token);
+          return data;
+        })
         .finally(() => { refreshing = null; });
     }
     const tokens = await refreshing;
     request.headers.Authorization = `Bearer ${tokens.access_token}`;
     return apiClient(request);
   } catch (refreshError) {
-    clearTokens();
+    if (getRefreshToken() === refreshToken && axios.isAxiosError(refreshError)
+      && [401, 403].includes(refreshError.response?.status ?? 0)) clearTokens();
     return Promise.reject(refreshError);
   }
 });

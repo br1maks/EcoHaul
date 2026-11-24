@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,10 +13,37 @@ from app.models.user import User
 from app.schemas.payment import PaymentResponse
 from app.schemas.subscription import SubscriptionResponse
 from app.services.payment_monitoring import PaymentMonitoringService
+from app.services.payment_lifecycle import recover_payment, accept_provider_state, load_payment, require_payments
+from app.services.yookassa_service import YooKassaService
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/payments", tags=["Админ: Платежи"])
+
+
+class ProviderReference(BaseModel):
+    provider_id: str | None = None
+
+
+@router.post("/{payment_id}/reconcile", response_model=PaymentResponse)
+async def reconcile_payment(payment_id: UUID, data: ProviderReference,
+                            admin: User = Depends(require_admin)):
+    require_payments()
+    if data.provider_id:
+        if not 1 <= len(data.provider_id) <= 100:
+            raise HTTPException(status_code=400, detail="Invalid provider id")
+        try:
+            async with asyncio.timeout(15):
+                remote = await asyncio.to_thread(YooKassaService.get_payment_info, data.provider_id)
+        except Exception:
+            raise HTTPException(status_code=502, detail="Provider verification unavailable")
+        metadata = dict(getattr(remote, "metadata", None) or {})
+        if metadata.get("payment_id") != str(payment_id) or remote.id != data.provider_id:
+            raise HTTPException(status_code=409, detail="Provider identity does not match requested payment")
+        await accept_provider_state(remote)
+        return await load_payment(payment_id)
+    return await recover_payment(payment_id, force=True)
 
 class PaymentStatisticsResponse(BaseModel):
     period_hours: int
@@ -94,14 +121,14 @@ async def mark_expired_payments(
     admin_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    logger.warning(f"Admin {admin_user.id} marking expired payments")
+    logger.info(f"Admin {admin_user.id} reconciling overdue payments")
 
     count = await PaymentMonitoringService.mark_expired_payments(db)
 
     return {
         "status": "ok",
-        "marked_as_cancelled": count,
-        "message": f"Помечено {count} платежей как CANCELLED"
+        "reconciled": count,
+        "message": f"Проверено {count} платежей у провайдера"
     }
 
 @router.get("/expiring-subscriptions", response_model=ExpiringSubscriptionsResponse)

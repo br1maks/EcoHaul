@@ -13,6 +13,8 @@ from app.core.database import async_session_maker
 from app.core.redis import get_redis
 from app.models.outbox import OutboxMessage
 from app.models.notification import Notification
+from app.models.verification_code import VerificationCode
+from app.services.verification_challenges import delivery_cipher
 from app.websocket.connection_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,7 @@ async def deliver(message: OutboxMessage) -> None:
     elif message.channel == "telegram":
         bot = Bot(token=settings.BOT_TOKEN)
         try:
-            await bot.send_message(chat_id=payload["telegram_id"], text=payload["text"])
+            await bot.send_message(chat_id=payload["telegram_id"], text=payload["text"] if "text" in payload else delivery_cipher().decrypt(payload["encrypted_text"].encode()).decode())
         finally:
             await bot.session.close()
     elif message.channel == "cache":
@@ -97,6 +99,9 @@ async def dispatch_one(channel: str) -> bool:
                                 )
                                 is not None
                             )
+                    if message.channel == "telegram" and message.payload.get("verification_code_id"):
+                        challenge = await db.get(VerificationCode, UUID(message.payload["verification_code_id"]))
+                        relevant = challenge is not None and challenge.is_valid
                     # Deleting an inbox entry must not resurrect it through an old
                     # undelivered realtime hint. Current order state still comes from HTTP.
                     if relevant:

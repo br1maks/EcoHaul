@@ -1,3 +1,4 @@
+import { SessionSettings } from '@/shared/components/SessionSettings';
 import { useState, useEffect } from 'react';
 import { usersApi } from '@/lib/api/users';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
@@ -129,6 +130,10 @@ export const AdminLayout = () => {
 
       {}
       <main className="flex-1 overflow-auto">
+        <details className="mx-6 mt-4 rounded-xl border border-gray-200 bg-white p-3">
+          <summary className="cursor-pointer text-sm text-gray-600">Сессии и выход</summary>
+          <div className="mt-3 max-w-2xl"><SessionSettings /></div>
+        </details>
         <Outlet />
       </main>
     </div>

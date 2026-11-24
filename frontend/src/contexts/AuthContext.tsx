@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { authApi, getAccessToken, setTokens } from '@/lib/api/auth';
 
 import { AuthContext } from './auth.context';
+import { usersApi } from '@/lib/api/users';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [state, setState] = useState<'loading' | 'ready' | 'required' | 'error'>('loading');
@@ -11,6 +12,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     async function initialize() {
       if (window.location.pathname === '/admin/login') {
         if (active) setState('ready');
+        return;
+      }
+      if (getAccessToken()) {
+        try { await usersApi.getMe(); if (active) setState('ready'); return; }
+        catch { if (active) setState('required'); return; }
+      }
+      if (sessionStorage.getItem('ecohaul_signed_out')) {
+        if (active) setState('required');
         return;
       }
       const tg = window.Telegram?.WebApp;
@@ -26,8 +35,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setState(getAccessToken() ? 'ready' : 'required');
       }
     }
+    const changed = () => { if (active) setState(getAccessToken() ? 'ready' : 'required'); };
+    window.addEventListener('ecohaul:auth', changed);
     void initialize();
-    return () => { active = false; };
+    return () => { active = false; window.removeEventListener('ecohaul:auth', changed); };
   }, []);
 
   if (state !== 'ready') return (
@@ -35,6 +46,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       <div className="max-w-sm text-center space-y-4">
         <h1 className="text-3xl font-bold text-green-800">EcoHaul</h1>
         <p>{state === 'loading' ? 'Подключаемся…' : state === 'error' ? 'Не удалось войти. Откройте приложение заново через Telegram.' : 'Откройте приложение через Telegram, чтобы оформить вывоз.'}</p>
+        {state !== 'loading' && window.Telegram?.WebApp?.initData && <button
+          className="block mx-auto rounded-lg bg-green-700 px-4 py-2 text-white"
+          onClick={() => { sessionStorage.removeItem('ecohaul_signed_out'); window.location.reload(); }}>
+          Войти через Telegram</button>}
         {state !== 'loading' && <a className="inline-block text-green-800 underline" href="/admin/login">Вход для администратора</a>}
       </div>
     </main>

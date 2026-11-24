@@ -12,23 +12,26 @@ class Socket {
   receive(message) { this.onmessage?.({ data: JSON.stringify(message) }); }
 }
 
-test('a publication retried after a lost acknowledgement is handled once across reconnects', (context) => {
+test('a publication retried after a lost acknowledgement is handled once across reconnects', async (context) => {
   const original = globalThis.WebSocket;
   globalThis.WebSocket = Socket;
   context.after(() => { globalThis.WebSocket = original; });
   const { wsManager } = loadTypeScript('src/lib/api/websocket.ts', {
     '@/config/env': { config: { wsUrl: 'ws://localhost/test' } },
     './tokens': { getAccessToken: () => 'local-test-token' },
+    './client': { apiClient: { post: async () => ({ data: { ticket: 'one-use-ticket-with-32-bytes' } }) } },
   });
   const events = [];
   wsManager.on('ORDER_STATUS_CHANGED', (message) => events.push(message));
   const message = { event_id: 'same-durable-event', type: 'ORDER_STATUS_CHANGED', data: { new_status: 'ARRIVED' } };
-  wsManager.connect('local-test-token');
+  await wsManager.connect('local-test-token');
   const staleSocket = Socket.instances.at(-1);
+  assert.ok(!staleSocket.url.includes('local-test-token'));
+  assert.ok(staleSocket.url.includes('ticket='));
   Socket.instances.at(-1).receive(message);
   Socket.instances.at(-1).receive(message);
   wsManager.disconnect();
-  wsManager.connect('local-test-token');
+  await wsManager.connect('local-test-token');
   staleSocket.receive({ ...message, event_id: 'stale-socket-event' });
   Socket.instances.at(-1).receive(message);
   Socket.instances.at(-1).receive({ ...message, event_id: 'next-durable-event' });
@@ -51,6 +54,24 @@ test('inbox snapshots merge with in-flight realtime entries without double count
   store.getState().markAllAsRead();
   store.getState().markAsRead('history');
   assert.equal(store.getState().unreadCount, 0);
+});
+
+test('a ticket response arriving after disconnect cannot open a socket', async (context) => {
+  const original = globalThis.WebSocket;
+  globalThis.WebSocket = Socket;
+  context.after(() => { globalThis.WebSocket = original; });
+  let finish;
+  const { wsManager } = loadTypeScript('src/lib/api/websocket.ts', {
+    '@/config/env': { config: { wsUrl: 'ws://localhost/test' } },
+    './tokens': { getAccessToken: () => 'local-test-token' },
+    './client': { apiClient: { post: () => new Promise((resolve) => { finish = resolve; }) } },
+  });
+  const before = Socket.instances.length;
+  const opening = wsManager.connect('local-test-token');
+  wsManager.disconnect();
+  finish({ data: { ticket: 'unused-ticket' } });
+  await opening;
+  assert.equal(Socket.instances.length, before);
 });
 
 test('a fresh inbox snapshot removes deleted rows and preserves newly arriving events', () => {

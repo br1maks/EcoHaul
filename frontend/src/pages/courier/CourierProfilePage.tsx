@@ -1,5 +1,6 @@
+import { SessionSettings } from '@/shared/components/SessionSettings';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Star, Package, CheckCircle, Clock, Award, Camera, User, Loader2, RefreshCw, LogOut, Settings, Bell, Moon, Volume2, ChevronRight, X, Coffee, Trophy, Zap } from 'lucide-react';
+import { Star, Package, CheckCircle, Clock, Award, Camera, User, Loader2, RefreshCw, Settings, Bell, Moon, Volume2, ChevronRight, X, Coffee, Trophy, Zap } from 'lucide-react';
 import { Card } from '@/shared/components/Card';
 import { Badge } from '@/shared/components/Badge';
 import { Button } from '@/shared/components/Button';
@@ -364,18 +365,13 @@ export const CourierProfilePage = () => {
               </div>
               <ChevronRight className="w-5 h-5 text-gray-400" />
             </Button>
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-red-600 hover:bg-red-50"
-            >
-              <LogOut className="w-5 h-5 mr-3" />
-              Выйти из аккаунта
-            </Button>
           </div>
         </Card>
       </div>
 
       {}
+      <div className="max-w-2xl mx-auto px-4 pb-6"><SessionSettings /></div>
+
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           {}

@@ -31,11 +31,8 @@ class PaymentBase(BaseSchema):
                 raise ValueError("order_id обязателен для ORDER_PAYMENT")
         
         elif self.payment_type == PaymentType.SUBSCRIPTION_PURCHASE:
-            if not self.subscription_id:
+            if self.status == PaymentStatus.COMPLETED and not self.subscription_id:
                 raise ValueError("subscription_id обязателен для SUBSCRIPTION_PURCHASE")
-        elif self.payment_type == PaymentType.WALLET_TOPUP:
-            if self.order_id or self.subscription_id:
-                raise ValueError("order_id и subscription_id должны быть None для WALLET_TOPUP")
         elif self.payment_type == PaymentType.REFUND:
             if not self.refund_for_payment_id:
                 raise ValueError("refund_for_payment_id обязателен для REFUND")
@@ -57,9 +54,6 @@ class PaymentCreate(BaseSchema):
         elif self.payment_type == PaymentType.SUBSCRIPTION_PURCHASE:
             if not self.subscription_id:
                 raise ValueError("subscription_id обязателен для SUBSCRIPTION_PURCHASE")
-        elif self.payment_type == PaymentType.WALLET_TOPUP:
-            if self.order_id or self.subscription_id:
-                raise ValueError("order_id и subscription_id должны быть None для WALLET_TOPUP")
         return self
 
 class PaymentUpdate(BaseSchema):
@@ -72,6 +66,8 @@ class PaymentUpdate(BaseSchema):
     cancelled_at: Optional[datetime] = None
 
 class PaymentResponse(UUIDMixin, TimestampMixin, PaymentBase):
+    creation_state: str = "LEGACY"
+    confirmation_url: Optional[str] = None
     is_pending: bool
     is_completed: bool
     is_failed: bool
@@ -87,6 +83,8 @@ class PaymentResponse(UUIDMixin, TimestampMixin, PaymentBase):
         if hasattr(data, "__dict__"):
             model_data = {
                 "id": data.id,
+                "creation_state": data.creation_state,
+                "confirmation_url": data.confirmation_url,
                 "created_at": data.created_at,
                 "updated_at": data.updated_at,
                 "user_id": data.user_id,

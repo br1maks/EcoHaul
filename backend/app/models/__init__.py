@@ -32,6 +32,7 @@ from .courier_shift import CourierShift
 from .verification_code import VerificationCode
 from .courier_application import CourierApplication
 from .outbox import OutboxMessage
+from .auth_session import AuthSession, AuthAttemptBucket, WebSocketTicket
 
 __all__ = [
     "Base",
@@ -69,4 +70,7 @@ __all__ = [
     "VerificationCode",
     "CourierApplication",
     "OutboxMessage",
+    "AuthSession",
+    "AuthAttemptBucket",
+    "WebSocketTicket",
 ]
