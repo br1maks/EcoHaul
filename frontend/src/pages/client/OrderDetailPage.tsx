@@ -1,3 +1,4 @@
+import { useRealtimeRefresh } from '@/shared/hooks/useRealtimeRefresh';
 import { useEffect, useState, useCallback } from 'react';
 import { ordersApi, reviewsApi } from '@/lib/api';
 import { paymentsApi } from '@/lib/api/payments';
@@ -70,6 +71,8 @@ export const OrderDetailPage = ({ orderId, onBack }: OrderDetailPageProps) => {
   useEffect(() => {
     loadOrder();
   }, [loadOrder]);
+
+  useRealtimeRefresh(loadOrder);
 
   const handleCancel = async () => {
     if (!order) return;

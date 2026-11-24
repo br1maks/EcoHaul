@@ -1,3 +1,4 @@
+import { useRealtimeRefresh } from '@/shared/hooks/useRealtimeRefresh';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, MapPin, CheckCircle, RefreshCw, Loader2, Calendar, Timer } from 'lucide-react';
@@ -50,12 +51,8 @@ export const CourierOrdersPage = () => {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadData(true);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [loadData]);
+  const refreshData = useCallback(() => loadData(true), [loadData]);
+  useRealtimeRefresh(refreshData);
 
   const handleAcceptOrder = async (orderId: string, e: React.MouseEvent) => {
     e.stopPropagation();

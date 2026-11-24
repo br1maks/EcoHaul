@@ -13,6 +13,7 @@ from app.core.database import engine
 from app.core.logging_config import setup_logging
 from app.core.redis import close_redis, get_redis, init_redis
 from app.websocket import router as websocket_router
+from app.services.outbox_dispatcher import CHANNELS, dispatch_forever
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
     await init_redis()
     bot = None
     bot_task = None
+    outbox_tasks = []
     try:
         if settings.TELEGRAM_ENABLED:
             from aiogram.types import BotCommand, BotCommandScopeDefault
@@ -36,8 +38,13 @@ async def lifespan(app: FastAPI):
                 scope=BotCommandScopeDefault(),
             )
             bot_task = asyncio.create_task(dp.start_polling(bot))
+        outbox_tasks = [asyncio.create_task(dispatch_forever(channel), name=f"outbox-{channel}")
+                        for channel in CHANNELS]
         yield
     finally:
+        for task in outbox_tasks:
+            task.cancel()
+        await asyncio.gather(*outbox_tasks, return_exceptions=True)
         if bot_task is not None:
             bot_task.cancel()
             try:

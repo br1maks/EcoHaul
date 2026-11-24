@@ -57,10 +57,15 @@ Common errors: 401 invalid/expired authentication; 403 role or ownership denial;
 
 ## WebSocket
 
-Connect to `/api/v1/ws?token=<access_token>`. Events use `{ "type": "...", "data": {...} }`.
+Connect to `/api/v1/ws?token=<access_token>`. Durable events use
+`{ "event_id": "<stable UUID>", "type": "...", "data": {...} }`; control frames such as
+`CONNECTED` and `PONG` do not need an event id. A retry reuses its original event id.
 Examples: `CONNECTED`, `NEW_ORDER`, `ORDER_ASSIGNED`, `ORDER_STATUS_CHANGED`,
 `NEW_NOTIFICATION`, `SHIFT_ENDED`. Send `PING` for a `PONG`, or `MARK_READ` with a
-notification id. Notification ownership is checked on updates.
+root-level `notification_id`. Ownership is checked, and read time is persisted.
+Assignment/status events carry the persistent inbox id as `data.notification_id`.
+After reconnect, reload order state and the inbox through HTTP; the socket is not a replay log.
 
 See [security](security.md) for token/log handling and [architecture](architecture.md)
-for the single-worker delivery limitation.
+for the single-worker delivery limitation. [Transactional events](events.md) details
+ordering, duplicate handling and operational recovery.

@@ -36,13 +36,6 @@ async def order_for(client, headers):
     return response.json(), address
 
 
-@pytest.fixture(autouse=True)
-def no_external_notifications(monkeypatch):
-    # Keep the real database, Redis, auth, routing and transactions; mock external delivery.
-    for task in ["notify_new_order_to_couriers", "notify_order_created", "notify_order_accepted", "notify_order_completed"]:
-        monkeypatch.setattr(f"app.api.v1.orders.{task}.delay", lambda *args, **kwargs: None)
-
-
 async def test_order_lifecycle_and_invalid_transition(client):
     customer = await login(client, 11001)
     courier = await login(client, 11002, "COURIER")

@@ -1,3 +1,4 @@
+import { useRealtimeRefresh } from '@/shared/hooks/useRealtimeRefresh';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -60,6 +61,8 @@ export const CourierOrderDetailPage = ({ orderId, onBack }: CourierOrderDetailPa
   }, [orderId, loadOrder]);
 
 
+
+  useRealtimeRefresh(loadOrder);
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!order) return;

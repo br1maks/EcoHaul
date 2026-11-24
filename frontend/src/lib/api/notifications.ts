@@ -10,3 +10,4 @@ export async function fetchNotifications(): Promise<Notification[]> {
   return data.map((item) => ({ ...item, type: 'order_confirmed', created_at: item.created_at ?? item.sent_at }));
 }
 export async function deleteAllNotifications(): Promise<void> { await apiClient.delete('/notifications/delete-all'); }
+export async function markAllNotificationsRead(): Promise<void> { await apiClient.post('/notifications/mark-all-read'); }

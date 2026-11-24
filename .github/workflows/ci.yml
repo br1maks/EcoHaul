@@ -39,7 +39,7 @@ jobs:
       - run: pip install poetry==2.5.2
       - run: poetry install --no-root --no-interaction
       - run: poetry run python -m compileall -q app
-      - run: poetry run flake8 app tests --select=E9,F63,F7,F82
+      - run: poetry run flake8 app tests scripts/outbox.py --select=E9,F63,F7,F82
       - run: poetry run pytest --integration -q
       - name: Fresh database migrations
         env:
@@ -63,6 +63,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint -- --max-warnings 0
+      - run: npm test
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
 

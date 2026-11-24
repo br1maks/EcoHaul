@@ -31,7 +31,7 @@ flowchart LR
     Broker --> Worker[Celery worker]
     Worker --> DB
     Worker --> Results[(Redis - results DB 2)]
-    Worker -->|optional delivery| Telegram[Telegram Bot API]
+    API -->|outbox - optional delivery| Telegram[Telegram Bot API]
     API -->|optional bot polling| Telegram
 ```
 
@@ -49,7 +49,7 @@ polling owner. See [Compose](../docker/docker-compose.yml),
 | HTTP transport | Pydantic input/output contracts, dependency-based authorization, response semantics | [schemas](../backend/app/schemas), [dependencies](../backend/app/api/dependencies.py) |
 | Domain operations | Ownership, transitions, price rules and transaction decisions | [order handlers](../backend/app/api/v1/orders.py), [payment handlers](../backend/app/api/v1/payments.py) |
 | Persistence | Relations, indexes, async session lifetime and schema evolution | [models](../backend/app/models), [database](../backend/app/core/database.py), [migrations](../backend/migrations) |
-| External integrations | Merchant API, verification codes and Telegram transport | [services](../backend/app/services), [notification tasks](../backend/app/tasks/notifications.py) |
+| External integrations | Merchant API, verification codes and Telegram transport | [services](../backend/app/services), [outbox dispatcher](../backend/app/services/outbox_dispatcher.py) |
 | Browser transport | Bearer attachment, coordinated refresh, HTTP error mapping and socket reconnection | [API clients](../frontend/src/lib/api) |
 | Presentation | Role-specific screens, shared components and local UI state | [pages](../frontend/src/pages), [store](../frontend/src/store) |
 
@@ -139,7 +139,7 @@ sequenceDiagram
     B->>API: Accept same order
     API->>DB: SELECT same order FOR UPDATE - waits
     API->>DB: Set courier A and ASSIGNED, insert related rows
-    Note over API,DB: Current handler also sends socket events before commit
+    API->>DB: Insert inbox notifications and outbox intents
     API->>DB: COMMIT first transaction
     DB-->>API: Waiting request sees ASSIGNED
     API-->>B: Reject - order already taken
@@ -175,9 +175,9 @@ rollback cannot undo an earlier committed transaction or an external message.
 
 | Operation | Durable boundary | External-effect boundary / consequence |
 | --- | --- | --- |
-| Create order | Order is explicitly committed before delivery/cache work | A later enqueue or Redis failure can fail the HTTP request after the order exists; blind retry can create another order |
-| Accept one order | Locked state, assignment and related rows are committed together | Socket events precede commit; Telegram enqueue and cache invalidation follow it |
-| Advance order status | Locked transition and counters are committed in the handler | Socket/task effects can occur before commit and survive a later rollback |
+| Create order | Order and delivery/cache intents commit together | Transport failure does not fail the committed command; unfinished delivery is retried |
+| Accept one order | Locked state, assignment, inbox and outbox rows commit together | Dispatcher only sees committed intents and performs network work outside order locks |
+| Advance order status | Locked transition, applicable counter and notification intents commit together | Rollback removes its events too; transport errors are handled by outbox retries |
 | Create provider payment | Local row is flushed; provider is called; provider id is saved and committed | Provider creation and local persistence cannot share a PostgreSQL transaction |
 | Settle payment callback | Verified payment is locked; payment and applicable subscription effect commit together | Provider lookup occurs first; crash/early-callback races still need reconciliation |
 
@@ -204,12 +204,12 @@ reconciliation, not simply more webhook retries. See the full
 
 ### Bulk commands and contention
 
-Bulk acceptance locks orders within one request/session. It does not use one independent
-transaction or savepoint per item, so catching an item exception does not establish
-isolated partial-success rollback. Locking overlapping sets in different orders can also
-introduce deadlocks. Canonical lock ordering, a defined batch atomicity contract and
-bounded retries for retryable database errors are useful next steps before expanding
-this workflow. Keep external I/O outside locks when extracting transaction services.
+Bulk acceptance deduplicates ids and locks in sorted UUID order. Business rejections
+are reported per item, while valid claims commit together. Unexpected failures roll back
+the entire batch, including inbox and outbox rows; no broad exception handler converts
+a failed database transaction into a misleading partial-success response. Single and
+bulk paths reuse the same acceptance helper. Further database retry policy should still
+be designed before asserting immunity to every possible deadlock elsewhere in the domain.
 
 ## 5. Async sessions and worker event loops
 
@@ -254,41 +254,34 @@ but accepting it still requires a locked database check. This separates discover
 freshness from assignment correctness. Redis errors can fail the affected request;
 there is no universal fail-open database fallback in this implementation.
 
-### Scheduled work and retry semantics
+### Scheduled work and durable delivery
 
 Celery Beat schedules order expiration every 300 seconds and subscription expiration
-every 3,600 seconds. The current schedule does not perform recurring subscription charges.
-Tasks use JSON serialization. Notification delivery is optional; when enabled, transient
-errors retry up to three times with a 60-second delay. Telegram `BadRequest` / `Forbidden`
-errors are logged without retry because repeating the same request is generally unhelpful.
+every 3,600 seconds. Tasks use JSON serialization and create outbox rows with their
+business changes. No current Beat schedule performs recurring subscription charges.
+Default Celery acknowledgement semantics still apply to the scheduled task itself;
+repeat sweeps revisit eligible domain rows, while committed delivery intents remain in
+PostgreSQL independently of broker acknowledgement.
 
-No late-acknowledgement policy is configured. Celery's default early acknowledgement
-means a worker failure can lose already acknowledged work. Explicit task retries handle
-selected exceptions, not every crash window. The project therefore does not claim
-at-least-once or exactly-once end-to-end execution. See
-[Celery task acknowledgement semantics](https://docs.celeryq.dev/en/stable/userguide/tasks.html).
+The API starts separate outbox loops for WebSocket, Telegram and cache work. Each claims
+one committed row using `FOR UPDATE SKIP LOCKED`, performs bounded network I/O while
+holding only that outbox-row lock, then records completion or retry. An unfinished earlier
+row blocks later rows in its own stream, including during backoff. Other streams can
+continue. The domain/outbox commit gap is closed; a crash after transport success and
+before delivery commit can still produce a duplicate publication.
 
-### WebSockets and the outbox boundary
+### WebSocket recovery and delivery boundaries
 
-Connections are authenticated at handshake and indexed by user id in an in-memory
-manager. The browser reconnects with bounded backoff, but there is no persistent event
-cursor, replay stream or cross-process fan-out. Reconnection is a reason to refresh
-current state through HTTP, not proof that every intervening event was received.
-[Security](security.md#7-websocket-authentication-and-connection-lifetime) explains
-credential lifetime and Origin considerations separately from delivery semantics.
+Connections remain in memory: use a single API process. The browser deduplicates recent
+`event_id` values, uses persisted inbox ids and refetches authoritative HTTP state after
+reconnect and on periodic visible-tab reconciliation. There is no per-device durable
+replay log or distributed fan-out. Offline socket attempts complete; inbox and order state
+are the recovery path. Successful transport writes do not acknowledge human receipt.
 
-A transactional outbox would close the current database/message gap:
-
-```text
-Proposed, not implemented:
-  command transaction: lock + update domain rows + insert outbox event + commit
-  dispatcher: claim pending events + publish + record outcome / retry
-  consumer: deduplicate by stable event id
-```
-
-An outbox makes publication recoverable after commit; it still needs idempotent consumers
-because publishing and marking an event delivered have their own crash window. Redis
-Pub/Sub alone would enable fan-out, not durable replay or recovery.
+See [transactional events](events.md) for the sequence diagram, retry/ordering rules,
+operator recovery/retention commands, covered producers and failure-injection tests.
+[Security](security.md#7-websocket-authentication-and-connection-lifetime) describes
+connection credential lifetime separately from publication semantics.
 
 ## 7. Startup, readiness and operating envelope
 
@@ -325,12 +318,13 @@ or availability targets have been established by load testing.
 | Pessimistic row locking for claims | Clear winner under contention; state checked while protected | Hold locks briefly; define deadlock retry and bulk ordering policy |
 | Async API and background workers | Request I/O and delayed work have different lifetimes | Async does not remove synchronous SDK work, broker failure or connection limits |
 | PostgreSQL plus Redis cache | Durable authority and faster repeated discovery are distinct | Cache invalidation may lag; Redis currently shares cache and broker failure impact |
+| Transactional outbox | Domain state and delivery intent commit atomically; retries survive process restart | Duplicate publications remain possible; monitor backlog and retain/clean payloads deliberately |
 | In-memory WebSocket registry | Simple direct delivery in a single API process | Distributed fan-out and connection ownership are prerequisites to multiple API workers |
 | Provider state fetched before settlement | Forged request bodies cannot directly grant entitlements | Provider availability affects callbacks; reconciliation must cover local/provider gaps |
 | PostGIS-backed locations | Typed spatial storage with room for spatial querying | Actual geofencing/routing requires implemented policies, queries and measurements |
 
 A sensible evolution order is: extract transaction-oriented command services; add
-persisted request idempotency and an outbox; implement payment reconciliation and
+persisted request idempotency; implement payment reconciliation and
 session revocation; then add distributed fan-out and measure bottlenecks before scaling.
 Each step changes an observable guarantee and should gain a matching failure-path test.
 
@@ -339,6 +333,7 @@ Each step changes an observable guarantee and should gain a matching failure-pat
 | Architectural claim | Executable evidence | Scope |
 | --- | --- | --- |
 | Concurrent claims cannot both assign one order | [test_orders.py](../backend/tests/test_orders.py) | Concurrent HTTP requests against real PostgreSQL |
+| Rolled-back commands publish nothing; stream order survives retries | [test_outbox.py](../backend/tests/test_outbox.py) | Real PostgreSQL, injected failures and concurrent dispatchers |
 | Repeated settlement does not repeat the same payment effect | [test_webhooks.py](../backend/tests/test_webhooks.py) | Real database, controlled provider responses |
 | Worker connections do not cross invocation loops | [test_worker.py](../backend/tests/test_worker.py) | Repeated task execution with separate event loops |
 | Dependency failure changes readiness | [test_health.py](../backend/tests/test_health.py) | Controlled DB/Redis failure probes |

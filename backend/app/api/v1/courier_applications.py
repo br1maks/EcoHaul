@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.tasks.notifications import notify_application_approved, notify_application_rejected
+from app.services.outbox import queue_telegram
 
 from app.core.database import get_db
 from app.api.dependencies import require_admin, get_current_active_user
@@ -231,7 +231,7 @@ async def review_application(
 ):
     stmt = select(CourierApplication).options(selectinload(CourierApplication.user)).where(
         CourierApplication.id == application_id
-    )
+    ).with_for_update(of=CourierApplication)
     result = await db.execute(stmt)
     application = result.scalar_one_or_none()
 
@@ -260,17 +260,16 @@ async def review_application(
             if application.email and not user.email:
                 user.email = application.email
 
-    await db.commit()
-    await db.refresh(application)
-
     if application.user and application.user.telegram_id:
         if data.status == CourierApplicationStatus.APPROVED:
-            notify_application_approved.delay(application.user.telegram_id)
+            queue_telegram(db, application.user.telegram_id, "Ваша заявка на курьера одобрена!\nТеперь вы можете принимать заказы.")
         elif data.status == CourierApplicationStatus.REJECTED:
             reason = data.admin_comment or "Причина не указана"
-            notify_application_rejected.delay(application.user.telegram_id, reason)
+            queue_telegram(db, application.user.telegram_id, f"Ваша заявка на курьера отклонена.\nПричина: {reason}")
     
     
+    await db.commit()
+
     return CourierApplicationResponse(
         id=application.id,
         user_id=application.user_id,

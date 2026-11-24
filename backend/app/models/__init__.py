@@ -31,6 +31,7 @@ from .notification import Notification
 from .courier_shift import CourierShift
 from .verification_code import VerificationCode
 from .courier_application import CourierApplication
+from .outbox import OutboxMessage
 
 __all__ = [
     "Base",
@@ -67,4 +68,5 @@ __all__ = [
     "CourierShift",
     "VerificationCode",
     "CourierApplication",
+    "OutboxMessage",
 ]

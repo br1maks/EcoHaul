@@ -1,3 +1,4 @@
+import { useRealtimeRefresh } from '@/shared/hooks/useRealtimeRefresh';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { courierApi } from '@/lib/api/courier';
@@ -98,12 +99,8 @@ export const CourierDashboardPage = () => {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadData(true);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [loadData]);
+  const refreshData = useCallback(() => loadData(true), [loadData]);
+  useRealtimeRefresh(refreshData);
 
   useEffect(() => {
     if (!activeShift) {

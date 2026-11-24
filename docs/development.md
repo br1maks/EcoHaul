@@ -100,7 +100,8 @@ with user data. Override `TEST_DB_HOST`, `TEST_DB_PORT`, `TEST_DB_PASSWORD` and
 
 Integration coverage includes authentication, role boundaries, blocked users, address
 ownership, order transitions, expiration, concurrent courier acceptance and checkout
-amount validation. External Telegram delivery is mocked; database transactions and
+amount validation. Outbox tests inject commit failure, interrupted delivery, timeouts
+and concurrent dispatchers to verify recovery and per-stream ordering. External Telegram delivery is mocked; database transactions and
 Redis are real. No payment is sent to a live merchant by the test suite.
 
 Afterwards, from the repository root:
@@ -114,6 +115,7 @@ docker compose -p ecohaul-test -f docker/compose.test.yml down
 ```sh
 cd frontend
 npm run lint -- --max-warnings 0
+npm test
 npm run build
 npm audit --omit=dev --audit-level=high
 ```
@@ -140,3 +142,16 @@ poetry -C backend run python scripts/seed_demo.py
 
 It prompts for a demo admin password and creates only fictional users and example orders.
 The admin email is `admin@example.test`. It does not import data from any other project.
+
+## Event dispatcher and recovery
+
+The API lifespan starts outbox dispatchers automatically after migrations. Keep one
+API process while WebSocket connections are process-local. Celery expiration jobs write
+intents into the same PostgreSQL database; they do not need the API to be running at the
+moment their transaction commits. The API drains the backlog when it starts again.
+
+Inspect pending work with `python scripts/outbox.py status` from the configured backend
+environment, or through `docker compose ... exec backend` as shown in the
+[event recovery guide](events.md#6-inspecting-and-recovering-work). Retry preserves event
+identity, explicit discard records abandonment, and purge removes only old terminal rows.
+Configure retention maintenance and alerts for old pending rows before public deployment.

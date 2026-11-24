@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Bell, X, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNotificationsStore } from '@/store/notifications.store';
-import { deleteAllNotifications } from '@/lib/api/notifications';
+import { deleteAllNotifications, markAllNotificationsRead } from '@/lib/api/notifications';
 
 const formatTimeAgo = (dateStr: string): string => {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -17,7 +17,7 @@ export const NotificationBell = () => {
   const panelRef = useRef<HTMLDivElement>(null);
   const notifications = useNotificationsStore((state) => state.notifications);
   const unreadCount = useNotificationsStore((state) => state.unreadCount);
-  const markAllAsRead = useNotificationsStore((state) => state.markAllAsRead);
+  const markAsRead = useNotificationsStore((state) => state.markAsRead);
   const clearNotifications = useNotificationsStore((state) => state.clearNotifications);
 
   useEffect(() => {
@@ -32,10 +32,18 @@ export const NotificationBell = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const handleToggle = () => {
+  const handleToggle = async () => {
     const opening = !isOpen;
     setIsOpen(opening);
-    if (opening) markAllAsRead();
+    if (opening) {
+      const visibleIds = notifications.map((notification) => notification.id);
+      try {
+        await markAllNotificationsRead();
+        for (const id of visibleIds) markAsRead(id);
+      } catch {
+        toast.error('Не удалось отметить уведомления прочитанными');
+      }
+    }
   };
 
   const handleClearAll = async () => {

@@ -20,8 +20,9 @@ from app.models.notification import Notification
 from app.models.order_queue import OrderQueue
 from app.models.enums import OrderStatus, GarbageType, SubscriptionTier, NotificationType, NotificationChannel, OrderQueueStatus
 from app.models.subscription import Subscription
-from app.websocket import manager, create_notification_message
-from app.tasks.notifications import notify_order_created, notify_order_accepted, notify_order_completed, notify_new_order_to_couriers
+from app.websocket import create_notification_message
+from app.services.outbox import queue_websocket, queue_telegram, invalidate_available_orders
+from app.services.order_events import queue_order_update
 from app.core.redis import get_redis
 import json 
 
@@ -192,10 +193,8 @@ async def create_order(
     )
     db.add(order)
     await db.flush()
-    await db.commit()
-    await db.refresh(order)
+    await db.refresh(order, ["pickup_address"])
 
-    from app.websocket import manager
     from app.websocket.schemas import create_new_order_message
     from app.models.enums import UserRole
 
@@ -210,37 +209,34 @@ async def create_order(
     if couriers:
         courier_ids = [courier.id for courier in couriers]
 
-        await db.refresh(order, ["pickup_address"])
-
         ws_message = create_new_order_message({
             "id": order.id,
             "pickup_address": order.pickup_address.full_address if order.pickup_address else "Адрес не указан",
             "delivery_address": None,
-            "garbage_type": str(order.garbage_type),
+            "garbage_type": getattr(order.garbage_type, "value", order.garbage_type),
             "number_of_bags": order.number_of_bags,
             "final_price": order.final_price,
             "created_at": order.created_at,
         })
 
-        await manager.send_to_users(courier_ids, ws_message)
+        for courier_id in courier_ids:
+            queue_websocket(db, courier_id, ws_message, aggregate_key=f"order:{order.id}")
 
-        courier_telegram_ids = [c.telegram_id for c in couriers if c.telegram_id]
-        if courier_telegram_ids:
-            pickup_address = order.pickup_address.full_address if order.pickup_address else "Адрес не указан"
-            notify_new_order_to_couriers.delay(
-                courier_telegram_ids,
-                pickup_address,
-                float(order.final_price),
-                str(order.garbage_type),
-                order.number_of_bags,
-            )
+        garbage_type = getattr(order.garbage_type, "value", order.garbage_type)
+        garbage_label = GARBAGE_TYPE_LABELS.get(garbage_type, garbage_type)
+        for courier in couriers:
+            queue_telegram(db, courier.telegram_id,
+                f"Новый заказ!\nАдрес: {address.full_address}\n"
+                f"{garbage_label}, {order.number_of_bags} мешк.\nЦена: {order.final_price} руб.\n\n"
+                "Откройте приложение, чтобы принять заказ.", aggregate_key=f"order:{order.id}")
 
-        if current_user.telegram_id:
-            notify_order_created.delay(current_user.telegram_id, str(order.id))
-
-    await get_redis().delete("orders:available")
-    await db.refresh(order, ["pickup_address"])
-    return order
+    # The client confirmation must not depend on whether any couriers exist.
+    queue_telegram(db, current_user.telegram_id, "Ваш заказ принят!\nИщем ближайшего курьера...",
+                   aggregate_key=f"order:{order.id}")
+    invalidate_available_orders(db)
+    response = OrderResponse.model_validate(order)
+    await db.commit()
+    return response
 
 @router.get("", response_model=OrderListResponse)
 async def get_my_orders(
@@ -405,6 +401,56 @@ class BulkAcceptResponse(BaseModel):
     total_accepted: int
     total_failed: int
 
+async def _accept_locked_order(db: AsyncSession, order: Order, courier: User) -> None:
+    """Caller owns the order lock; all mutations and delivery intents share its transaction."""
+    now = datetime.now(timezone.utc)
+    order.courier_id = courier.id
+    order.status = OrderStatus.ASSIGNED
+    order.accepted_at = now
+    db.add(OrderQueue(
+        order_id=order.id, courier_id=courier.id, status=OrderQueueStatus.ACCEPTED,
+        priority=order.priority, distance_km=0.0, offered_at=now,
+        expires_at=now + timedelta(minutes=30), responded_at=now,
+    ))
+    address = order.pickup_address
+    address_text = f"\nАдрес: {address.street}, {address.house_number}" if address else ""
+    if address and address.apartment:
+        address_text += f", кв. {address.apartment}"
+    label = GARBAGE_TYPE_LABELS.get(str(order.garbage_type), str(order.garbage_type))
+    details = f"{label}, {order.number_of_bags} мешк.\nЦена: {order.final_price} руб.{address_text}"
+    if order.description:
+        details += f"\n{order.description}"
+    client_message = (
+        f"Курьер: {courier.first_name} {courier.last_name or ''}\n"
+        f"Телефон: {courier.phone or 'не указан'}\nРейтинг: {courier.rating:.1f}★"
+    )
+    courier_notification = Notification(
+        user_id=courier.id, order_id=order.id, notification_type=NotificationType.ORDER_ASSIGNED,
+        channel=NotificationChannel.IN_APP, title="Заказ принят", message=details, sent_at=now,
+    )
+    client_notification = Notification(
+        user_id=order.client_id, order_id=order.id, notification_type=NotificationType.ORDER_ASSIGNED,
+        channel=NotificationChannel.IN_APP, title="Заказ принят курьером", message=client_message, sent_at=now,
+    )
+    db.add_all([courier_notification, client_notification])
+    await db.flush()
+    queue_websocket(db, courier.id, create_notification_message({
+        "id": courier_notification.id, "title": courier_notification.title,
+        "message": courier_notification.message, "priority": "HIGH", "created_at": now,
+    }), aggregate_key=f"order:{order.id}")
+    from app.websocket.schemas import create_order_assigned_message
+    assigned_message = create_order_assigned_message(
+        order.id, f"{courier.first_name} {courier.last_name or ''}".strip(),
+        courier.phone or "не указан", courier.rating, client_message,
+    )
+    assigned_message["data"]["notification_id"] = str(client_notification.id)
+    queue_websocket(db, order.client_id, assigned_message, aggregate_key=f"order:{order.id}")
+    client = await db.get(User, order.client_id)
+    if client:
+        name = f"{courier.first_name} {courier.last_name or ''}".strip()
+        queue_telegram(db, client.telegram_id, f"Курьер {name} едет к вам!", aggregate_key=f"order:{order.id}")
+
+
 @router.post("/accept-bulk", response_model=BulkAcceptResponse)
 async def accept_orders_bulk(
     data: BulkAcceptOrders,
@@ -412,110 +458,32 @@ async def accept_orders_bulk(
     db: AsyncSession = Depends(get_db),
 ):
     if not current_user.password_hash:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="У курьера не установлен пароль",
-        )
-
+        raise HTTPException(status_code=400, detail="У курьера не установлен пароль")
     if not verify_password(data.password, current_user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный пароль",
-        )
-
+        raise HTTPException(status_code=401, detail="Неверный пароль")
     accepted_orders = []
     failed_orders = []
+    # Canonical acquisition order prevents opposite-order deadlocks between batches.
+    for order_id in sorted(set(data.order_ids), key=str):
+        order = await db.scalar(select(Order).where(Order.id == order_id)
+            .options(selectinload(Order.pickup_address)).with_for_update(of=Order))
+        if order is None:
+            failed_orders.append({"order_id": str(order_id), "reason": "Заказ не найден"})
+            continue
+        if order.status != OrderStatus.PENDING or order.is_expired:
+            failed_orders.append({"order_id": str(order_id), "reason": "Заказ уже назначен или недоступен"})
+            continue
+        await _accept_locked_order(db, order, current_user)
+        accepted_orders.append(OrderResponse.model_validate(order))
+    if accepted_orders:
+        invalidate_available_orders(db)
+    # Expected business rejections are per item. Infrastructure failures roll back
+    # the entire batch, including every notification and outbox row.
+    response = BulkAcceptResponse(accepted_orders=accepted_orders, failed_orders=failed_orders,
+        total_accepted=len(accepted_orders), total_failed=len(failed_orders))
+    await db.commit()
+    return response
 
-    for order_id in data.order_ids:
-        try:
-            stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.pickup_address)).with_for_update(of=Order)
-            result = await db.execute(stmt)
-            order = result.scalar_one_or_none()
-
-            if order is None:
-                failed_orders.append({
-                    "order_id": str(order_id),
-                    "reason": "Заказ не найден"
-                })
-                continue
-
-            if order.status != OrderStatus.PENDING or order.is_expired:
-                failed_orders.append({
-                    "order_id": str(order_id),
-                    "reason": f"Заказ уже в статусе {str(order.status)}"
-                })
-                continue
-
-            now = datetime.now(timezone.utc)
-            order.courier_id = current_user.id
-            order.status = OrderStatus.ASSIGNED
-            order.accepted_at = now
-
-            queue_entry = OrderQueue(
-                order_id=order.id,
-                courier_id=current_user.id,
-                status=OrderQueueStatus.ACCEPTED,
-                priority=order.priority,
-                distance_km=0.0,
-                offered_at=now,
-                expires_at=now + timedelta(minutes=30),
-                responded_at=now,
-            )
-            db.add(queue_entry)
-
-            addr = order.pickup_address
-            addr_str = ""
-            if addr:
-                addr_str = f"\nАдрес: {addr.street}, {addr.house_number}"
-                if addr.apartment:
-                    addr_str += f", кв. {addr.apartment}"
-
-            garbage_label = GARBAGE_TYPE_LABELS.get(str(order.garbage_type), str(order.garbage_type))
-            notification_message = (
-                f"{garbage_label} · {order.number_of_bags} мешк.\n"
-                f"Цена: {order.final_price} руб.{addr_str}"
-            )
-            if order.description:
-                notification_message += f"\n{order.description}"
-
-            notification = Notification(
-                user_id=current_user.id,
-                order_id=order.id,
-                notification_type=NotificationType.ORDER_ASSIGNED,
-                channel=NotificationChannel.IN_APP,
-                title="Заказ принят",
-                message=notification_message,
-                sent_at=datetime.now(timezone.utc),
-            )
-            db.add(notification)
-            await db.flush()
-
-            ws_message = create_notification_message({
-                "id": notification.id,
-                "title": notification.title,
-                "message": notification.message,
-                "priority": "HIGH",
-                "created_at": notification.sent_at,
-            })
-            await manager.send_personal_message(current_user.id, ws_message)
-
-            accepted_orders.append(order)
-
-        except Exception as e:
-            failed_orders.append({
-                "order_id": str(order_id),
-                "reason": f"Ошибка: {str(e)}"
-            })
-
-    await db.flush()
-
-    await get_redis().delete("orders:available")
-    return BulkAcceptResponse(
-        accepted_orders=accepted_orders,
-        failed_orders=failed_orders,
-        total_accepted=len(accepted_orders),
-        total_failed=len(failed_orders),
-    )
 
 @router.post("/{order_id}/accept", response_model=OrderResponse)
 async def accept_order(
@@ -526,126 +494,21 @@ async def accept_order(
 ):
     if data and data.password:
         if not current_user.password_hash:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="У курьера не установлен пароль",
-            )
-
+            raise HTTPException(status_code=400, detail="У курьера не установлен пароль")
         if not verify_password(data.password, current_user.password_hash):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Неверный пароль",
-            )
-
-    stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.pickup_address)).with_for_update(of=Order)
-    result = await db.execute(stmt)
-    order = result.scalar_one_or_none()
-
+            raise HTTPException(status_code=401, detail="Неверный пароль")
+    order = await db.scalar(select(Order).where(Order.id == order_id)
+        .options(selectinload(Order.pickup_address)).with_for_update(of=Order))
     if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Заказ с таким id не найден",
-        )
+        raise HTTPException(status_code=404, detail="Заказ с таким id не найден")
     if order.status != OrderStatus.PENDING or order.is_expired:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Заказ уже назначен или недоступен",
-        )
-
-    now = datetime.now(timezone.utc)
-    order.courier_id = current_user.id
-    order.status = OrderStatus.ASSIGNED
-    order.accepted_at = now
-
-    queue_entry = OrderQueue(
-        order_id=order.id,
-        courier_id=current_user.id,
-        status=OrderQueueStatus.ACCEPTED,
-        priority=order.priority,
-        distance_km=0.0,
-        offered_at=now,
-        expires_at=now + timedelta(minutes=30),
-        responded_at=now,
-    )
-    db.add(queue_entry)
-
-    addr = order.pickup_address
-    addr_str = ""
-    if addr:
-        addr_str = f"\nАдрес: {addr.street}, {addr.house_number}"
-        if addr.apartment:
-            addr_str += f", кв. {addr.apartment}"
-
-    garbage_label = GARBAGE_TYPE_LABELS.get(str(order.garbage_type), str(order.garbage_type))
-    notification_message = (
-        f"{garbage_label}, {order.number_of_bags} мешк.\n"
-        f"Цена: {order.final_price} руб.{addr_str}"
-    )
-    if order.description:
-        notification_message += f"\n{order.description}"
-
-    notification_courier = Notification(
-        user_id=current_user.id,
-        order_id=order.id,
-        notification_type=NotificationType.ORDER_ASSIGNED,
-        channel=NotificationChannel.IN_APP,
-        title="Заказ принят",
-        message=notification_message,
-        sent_at=datetime.now(timezone.utc),
-    )
-    db.add(notification_courier)
-
-    client_message = (
-        f"Курьер: {current_user.first_name} {current_user.last_name}\n"
-        f"Телефон: {current_user.phone or 'не указан'}\n"
-        f"Рейтинг: {current_user.rating:.1f}★"
-    )
-
-    notification_client = Notification(
-        user_id=order.client_id,
-        order_id=order.id,
-        notification_type=NotificationType.ORDER_ASSIGNED,
-        channel=NotificationChannel.IN_APP,
-        title="Заказ принят курьером",
-        message=client_message,
-        sent_at=datetime.now(timezone.utc),
-    )
-    db.add(notification_client)
-
-    await db.flush()
-
-    ws_message_courier = create_notification_message({
-        "id": notification_courier.id,
-        "title": notification_courier.title,
-        "message": notification_courier.message,
-        "priority": "HIGH",
-        "created_at": notification_courier.sent_at,
-    })
-    await manager.send_personal_message(current_user.id, ws_message_courier)
-
-    from app.websocket.schemas import create_order_assigned_message
-    ws_message_client = create_order_assigned_message(
-        order_id=order.id,
-        courier_name=f"{current_user.first_name} {current_user.last_name}",
-        courier_phone=current_user.phone or "не указан",
-        courier_rating=current_user.rating,
-        message=client_message
-    )
-    await manager.send_personal_message(order.client_id, ws_message_client)
-
+        raise HTTPException(status_code=400, detail="Заказ уже назначен или недоступен")
+    await _accept_locked_order(db, order, current_user)
+    invalidate_available_orders(db)
+    response = OrderResponse.model_validate(order)
     await db.commit()
-    await db.refresh(order)
+    return response
 
-    if order.client_id:
-        client_stmt = select(User).where(User.id == order.client_id)
-        client_result = await db.execute(client_stmt)
-        client_user = client_result.scalar_one_or_none()
-
-        if client_user and client_user.telegram_id:
-            courier_name = f"{current_user.first_name} {current_user.last_name}"
-            notify_order_accepted.delay(client_user.telegram_id, courier_name)
-    await get_redis().delete("orders:available")
-    return order
 
 @router.patch("/{order_id}/status", response_model=OrderResponse)
 async def update_order_status(
@@ -676,7 +539,6 @@ async def update_order_status(
             detail="Этот заказ не назначен на вас",
         )
 
-    from app.websocket import manager
     from app.websocket.schemas import create_order_status_message
 
     if data.status == OrderStatus.IN_PROGRESS:
@@ -695,7 +557,7 @@ async def update_order_status(
             message=f"Курьер начал выполнение заказа и направляется к вам",
             old_status=old_status
         )
-        await manager.send_personal_message(order.client_id, ws_message)
+        queue_order_update(db, order.client_id, ws_message)
 
     elif data.status == OrderStatus.ARRIVED:
         if order.status != OrderStatus.IN_PROGRESS:
@@ -713,7 +575,7 @@ async def update_order_status(
             message=f"Курьер прибыл на место. Ожидайте звонка в дверь!",
             old_status=old_status
         )
-        await manager.send_personal_message(order.client_id, ws_message)
+        queue_order_update(db, order.client_id, ws_message)
 
     elif data.status == OrderStatus.COMPLETED:
         if order.status not in [OrderStatus.IN_PROGRESS, OrderStatus.ARRIVED]:
@@ -738,20 +600,21 @@ async def update_order_status(
             message=f"Заказ выполнен! Спасибо за использование EcoHaul",
             old_status=old_status
         )
-        await manager.send_personal_message(order.client_id, ws_message_client)
+        queue_order_update(db, order.client_id, ws_message_client)
         if order.client_id:
             completed_client_stmt = select(User).where(User.id == order.client_id)
             completed_client_result = await db.execute(completed_client_stmt)
             completed_client = completed_client_result.scalar_one_or_none()
             if completed_client and completed_client.telegram_id:
-                notify_order_completed.delay(completed_client.telegram_id)
+                queue_telegram(db, completed_client.telegram_id, "Заказ выполнен! Спасибо что пользуетесь нашим приложением.", aggregate_key=f"order:{order.id}")
         ws_message_courier = create_order_status_message(
             order_id=order.id,
             status="COMPLETED",
             message=f"Заказ успешно завершён! Отличная работа.",
             old_status=old_status
         )
-        await manager.send_personal_message(current_user.id, ws_message_courier)
+        if order.courier_id:
+            queue_order_update(db, order.courier_id, ws_message_courier)
 
     else:
         raise HTTPException(
@@ -759,17 +622,9 @@ async def update_order_status(
             detail="Недопустимый статус",
         )
 
+    response = OrderResponse.model_validate(order)
     await db.commit()
-
-    stmt_refresh = select(Order).options(
-        joinedload(Order.client),
-        joinedload(Order.courier),
-        joinedload(Order.pickup_address),
-    ).where(Order.id == order_id)
-    result_refresh = await db.execute(stmt_refresh)
-    order = result_refresh.unique().scalar_one()
-
-    return order
+    return response
 
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(
@@ -837,18 +692,16 @@ async def cancel_order(
     order.cancelled_by_id = current_user.id
     order.cancellation_reason = data.reason
 
-    await db.commit()
-
+    from app.websocket.schemas import create_order_status_message
+    queue_order_update(db, order.client_id, create_order_status_message(
+        order.id, "CANCELLED", f"Заказ отменён. Причина: {data.reason or 'Не указана'}"))
     if courier_id:
-        from app.websocket import manager
-        from app.websocket.schemas import create_order_status_message
-
         ws_message = create_order_status_message(
             order_id=order.id,
             status="CANCELLED",
             message=f"Заказ отменён клиентом. Причина: {data.reason or 'Не указана'}"
         )
-        await manager.send_personal_message(courier_id, ws_message)
+        queue_order_update(db, courier_id, ws_message)
 
     stmt_refresh = select(Order).options(
         joinedload(Order.client),
@@ -858,8 +711,10 @@ async def cancel_order(
     result_refresh = await db.execute(stmt_refresh)
     order = result_refresh.unique().scalar_one()
 
-    await get_redis().delete("orders:available")
-    return order
+    invalidate_available_orders(db)
+    response = OrderResponse.model_validate(order)
+    await db.commit()
+    return response
 
 @router.patch("/{order_id}/assign-courier", response_model=OrderResponse)
 async def assign_courier_to_order(
@@ -868,8 +723,6 @@ async def assign_courier_to_order(
         current_user: User = Depends(require_admin),
         db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy.orm import joinedload
-
     stmt = select(Order).where(Order.id == order_id).with_for_update(of=Order)
     result = await db.execute(stmt)
     order = result.scalar_one_or_none()
@@ -897,22 +750,10 @@ async def assign_courier_to_order(
             detail="Курьер не найден",
         )
 
-    now = datetime.now(timezone.utc)
-    order.courier_id = courier_id
-    order.status = OrderStatus.ASSIGNED
-    order.accepted_at = now
-
+    await db.refresh(order, ["pickup_address"])
+    await _accept_locked_order(db, order, courier)
     courier.total_orders += 1
-
+    invalidate_available_orders(db)
+    response = OrderResponse.model_validate(order)
     await db.commit()
-
-    stmt_refresh = select(Order).options(
-        joinedload(Order.client),
-        joinedload(Order.courier),
-        joinedload(Order.pickup_address),
-    ).where(Order.id == order_id)
-    result_refresh = await db.execute(stmt_refresh)
-    order = result_refresh.unique().scalar_one()
-
-    await get_redis().delete("orders:available")
-    return order
+    return response

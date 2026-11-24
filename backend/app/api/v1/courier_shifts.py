@@ -1,12 +1,11 @@
 
 from typing import Optional, cast
 from uuid import UUID
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.api.dependencies import require_courier, require_admin
@@ -104,10 +103,7 @@ async def end_shift(
     if early_end_reason is not None:
         active_shift.early_end_reason = early_end_reason
 
-    await db.commit()
-    await db.refresh(active_shift)
-
-    from app.websocket import manager
+    from app.services.outbox import queue_websocket
 
     if active_shift.ended_at is None:
         raise HTTPException(
@@ -130,9 +126,13 @@ async def end_shift(
         }
     }
 
-    await manager.send_personal_message(current_user.id, ws_message)
+    queue_websocket(db, current_user.id, ws_message)
+    await db.flush()
+    await db.refresh(active_shift)
+    response = CourierShiftResponse.model_validate(active_shift)
+    await db.commit()
 
-    return CourierShiftResponse.model_validate(active_shift)
+    return response
 
 @router.get(
     "/current",
@@ -281,7 +281,7 @@ async def send_daily_stats_notification(
             delta = shift.ended_at - shift.started_at
             total_hours += delta.total_seconds() / 3600
 
-    from app.websocket import manager
+    from app.services.outbox import queue_websocket
 
     ws_message = {
         "type": "DAILY_STATS",
@@ -295,9 +295,9 @@ async def send_daily_stats_notification(
         }
     }
 
-    await manager.send_personal_message(courier_id, ws_message)
+    queue_websocket(db, courier_id, ws_message)
 
-    return {"status": "sent", "courier_id": str(courier_id)}
+    return {"status": "queued", "courier_id": str(courier_id)}
 
 @router.post(
     "/send-shift-reminder",
@@ -323,7 +323,7 @@ async def send_shift_reminder(
             detail=f"Курьер {courier_id} не найден",
         )
 
-    from app.websocket import manager
+    from app.services.outbox import queue_websocket
 
     ws_message = {
         "type": "SHIFT_REMINDER",
@@ -334,6 +334,6 @@ async def send_shift_reminder(
         }
     }
 
-    await manager.send_personal_message(courier_id, ws_message)
+    queue_websocket(db, courier_id, ws_message)
 
-    return {"status": "sent", "courier_id": str(courier_id), "shift_start_time": shift_start_time.isoformat()}
+    return {"status": "queued", "courier_id": str(courier_id), "shift_start_time": shift_start_time.isoformat()}
