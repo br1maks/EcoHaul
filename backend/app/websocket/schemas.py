@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -47,7 +47,7 @@ def create_order_status_message(
         "order_id": str(order_id),
         "new_status": status,
         "message": message,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
     if old_status:
@@ -91,6 +91,6 @@ def create_order_assigned_message(
             "courier_phone": courier_phone,
             "courier_rating": round(courier_rating, 1),
             "message": message,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     }

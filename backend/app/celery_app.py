@@ -17,7 +17,6 @@ celery_app.conf.update(
     enable_utc=True,
 
     include=[
-        "app.tasks.notifications",
         "app.tasks.orders",
         "app.tasks.subscriptions",
     ],

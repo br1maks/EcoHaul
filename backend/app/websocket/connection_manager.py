@@ -1,4 +1,5 @@
 from typing import Dict, Set, Optional
+import asyncio
 from uuid import UUID
 import logging
 
@@ -29,19 +30,30 @@ class ConnectionManager:
             else:
                 logger.info(f"WebSocket отключён для {user_id}. Осталось соединений: {len(self.active_connections[user_id])}")
     
-    async def send_personal_message(self, user_id: UUID, message: dict):
-        if user_id not in self.active_connections:
-            logger.warning(f"Пользователь {user_id} не подключён к WebSocket")
-            return
-        
-        connections = self.active_connections[user_id].copy()
+    async def send_personal_message(self, user_id: UUID, message: dict) -> int:
+        # Offline users recover persistent state/inbox through HTTP after reconnect.
+        connections = tuple(self.active_connections.get(user_id, ()))
 
-        for websocket in connections:
+        async def send(websocket: WebSocket) -> bool:
             try:
-                await websocket.send_json(message)
-            except Exception as e:
-                logger.info(f"Ошибка отправки сообщения пользователю {user_id}: {e}")
+                async with asyncio.timeout(3):
+                    await websocket.send_json(message)
+                return True
+            except Exception:
                 self.disconnect(user_id, websocket)
+                try:
+                    async with asyncio.timeout(1):
+                        await websocket.close(code=1011)
+                except Exception:
+                    pass
+                return False
+
+        results = await asyncio.gather(*(send(connection) for connection in connections))
+        if not all(results):
+            # Preserve the intent for retry. Other tabs may have received this event;
+            # stable event ids let them suppress a duplicate publication.
+            raise ConnectionError("WebSocket transport failed")
+        return len(results)
 
     async def broadcast(self, message: dict, exclude_user: Optional[UUID] = None):
         for user_id in list(self.active_connections.keys()):

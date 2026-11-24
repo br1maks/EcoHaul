@@ -2,13 +2,16 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.celery_app import celery_app
 from app.core.database import async_session_maker
 from app.models.order import Order
 from app.models.user import User
 from app.models.enums import OrderStatus
+from app.services.outbox import queue_telegram, invalidate_available_orders
+from app.services.order_events import queue_order_update
+from app.websocket.schemas import create_order_status_message
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,8 @@ async def _cancel_expired() -> None:
             order.status = OrderStatus.CANCELLED
             order.cancelled_at = now
             order.cancellation_reason = "Заказ отменён автоматически — истёк срок ожидания"
+            queue_order_update(db, order.client_id, create_order_status_message(
+                order.id, "CANCELLED", order.cancellation_reason, old_status="PENDING"))
             cancelled_count += 1
 
             if order.client_id:
@@ -43,13 +48,13 @@ async def _cancel_expired() -> None:
                 client_result = await db.execute(client_stmt)
                 client = client_result.scalar_one_or_none()
                 if client and client.telegram_id:
-                    from app.tasks.notifications import notify_user
-                    notify_user.delay(
+                    queue_telegram(db,
                         client.telegram_id,
                         f"Ваш заказ #{str(order.id)[:8]}... отменён — "
                         "никто из курьеров не взял его вовремя. "
-                        "Попробуйте создать новый заказ."
+                        "Попробуйте создать новый заказ.", aggregate_key=f"order:{order.id}"
                     )
 
+        invalidate_available_orders(db)
         await db.commit()
         logger.info(f"Автоотмена: отменено {cancelled_count} просроченных заказов")

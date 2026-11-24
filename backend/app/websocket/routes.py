@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
@@ -91,7 +92,7 @@ async def websocket_endpoint(
                                     Notification.id == UUID(notification_id),
                                     Notification.user_id == user_id
                                 )
-                                .values(is_read=True)
+                                .values(is_read=True, read_at=datetime.now(timezone.utc))
                             )
                             await db.execute(stmt)
                             await db.commit()

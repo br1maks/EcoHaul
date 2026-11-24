@@ -14,20 +14,37 @@ export const useWebSocket = () => {
     }, []);
     const addNotification = useNotificationsStore((state) => state.addNotification);
     const setNotifications = useNotificationsStore((state) => state.setNotifications);
+    const mergeNotifications = useNotificationsStore((state) => state.mergeNotifications);
 
     useEffect(() => {
-        if (!token) {
-            setNotifications([]);
-            return;
-        }
-        fetchNotifications()
-            .then((data) => setNotifications(data))
-            .catch(() => {});
+        setNotifications([]);
     }, [setNotifications, token]);
 
     useEffect(() => {
         if (!token) return;
 
+        let active = true;
+        const syncInbox = () => {
+            if (document.visibilityState === 'hidden') return;
+            const snapshot = useNotificationsStore.getState();
+            fetchNotifications().then((data) => {
+                if (active && snapshot.generation === useNotificationsStore.getState().generation) {
+                    mergeNotifications(data, snapshot.notifications);
+                }
+            }).catch(() => {});
+        };
+        const unsubConnected = wsManager.on('CONNECTED', () => {
+            syncInbox();
+            window.dispatchEvent(new Event('ecohaul:sync'));
+        });
+        const unsubChanges = wsManager.on('*', (message) => {
+            if (['NEW_ORDER', 'ORDER_ASSIGNED', 'ORDER_STATUS_CHANGED', 'SHIFT_ENDED'].includes(message.type)) {
+                window.dispatchEvent(new Event('ecohaul:sync'));
+            }
+        });
+        document.addEventListener('visibilitychange', syncInbox);
+        const inboxInterval = setInterval(syncInbox, 30000);
+        syncInbox();
         wsManager.connect(token);
 
         const unsubNewOrder = wsManager.on('NEW_ORDER', (message) => {
@@ -57,13 +74,13 @@ export const useWebSocket = () => {
             const text = `Курьер ${data.courier_name} едет к вам!`;
             toast.success(text, { duration: 5000 });
             addNotification({
-                id: crypto.randomUUID(),
+                id: String(data.notification_id ?? message.event_id ?? crypto.randomUUID()),
                 user_id: '',
                 type: 'courier_assigned',
                 title: 'Курьер назначен',
                 message: text,
                 is_read: false,
-                created_at: new Date().toISOString(),
+                created_at: String(data.timestamp ?? new Date().toISOString()),
             });
         });
 
@@ -87,13 +104,13 @@ export const useWebSocket = () => {
             }
 
             addNotification({
-                id: crypto.randomUUID(),
+                id: String(data.notification_id ?? message.event_id ?? crypto.randomUUID()),
                 user_id: '',
                 type: 'order_confirmed',
                 title: 'Статус заказа',
                 message: text,
                 is_read: false,
-                created_at: new Date().toISOString(),
+                created_at: String(data.timestamp ?? new Date().toISOString()),
             });
         });
 
@@ -108,16 +125,21 @@ export const useWebSocket = () => {
                 title: String(data.title ?? 'Уведомление'),
                 message: text,
                 is_read: false,
-                created_at: new Date().toISOString(),
+                created_at: String(data.created_at ?? new Date().toISOString()),
             });
         });
 
         return () => {
+            active = false;
+            clearInterval(inboxInterval);
+            document.removeEventListener('visibilitychange', syncInbox);
+            unsubConnected();
+            unsubChanges();
             unsubNewOrder();
             unsubAssigned();
             unsubStatus();
             unsubNotif();
             wsManager.disconnect();
         };
-    }, [addNotification, token]);
+    }, [addNotification, mergeNotifications, token]);
 };

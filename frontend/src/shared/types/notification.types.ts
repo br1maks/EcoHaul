@@ -17,6 +17,7 @@ export interface Notification {
 }
 
 export interface WsMessage {
+  event_id?: string;
   type: string;
   data: Record<string, unknown>;
 }

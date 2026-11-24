@@ -44,6 +44,11 @@ including BYN/country compatibility, is not claimed. Details: [integration bound
 **One order, one courier.** Acceptance uses a PostgreSQL row lock and rechecks status
 and expiration. An integration test races two couriers against the same order.
 
+**State and events commit together.** A transactional outbox records notification and
+cache work alongside domain changes. Failure-injection tests check rollback, retry,
+stream ordering and the crash window that can cause duplicate publication.
+[Delivery model and recovery](docs/events.md).
+
 **Permissions backed by current data.** JWTs identify a user; authorization checks the
 active database record and required role. Address and payment access is owner-scoped.
 
@@ -63,7 +68,7 @@ and builds/lints the frontend.
 | Why do the API and Celery use different connection strategies? | [Async sessions, eager loading and event-loop lifetimes](docs/architecture.md#5-async-sessions-and-worker-event-loops) |
 | Which identity and permissions does the server actually trust? | [Telegram validation](docs/security.md#2-telegram-authentication-canonicalization-provenance-and-freshness), [JWT lifecycle](docs/security.md#3-jwt-lifecycle-and-browser-session-behavior) and [object authorization](docs/security.md#4-authorization-is-role--account-state--object-relationship) |
 | Can a forged or repeated payment callback grant access? | [Provider verification, amount checks and settlement idempotency](docs/security.md#6-payment-integrity-and-idempotency) |
-| What must change before adding API workers or stronger delivery guarantees? | [Cache, task acknowledgements, socket fan-out and the proposed outbox](docs/architecture.md#6-cache-jobs-and-realtime-delivery) |
+| What must change before adding API workers or stronger delivery guarantees? | [Transactional delivery, retries, browser recovery and scaling boundaries](docs/architecture.md#6-cache-jobs-and-realtime-delivery) |
 
 ## Quick start
 
@@ -143,9 +148,9 @@ docs/              Architecture, API, development and security
 ## Scope and next steps
 
 This is a portfolio application with explicit deployment boundaries. WebSocket delivery
-currently uses a single-process connection registry; notification dispatch is best effort;
-refresh sessions do not yet have server-side revocation. The next architectural steps
-are an outbox, distributed event fan-out and refresh-session management.
+uses a single-process connection registry. Delivery intents are durable and retryable;
+end-user receipt is not exactly once. The next architectural steps are request idempotency,
+payment reconciliation, distributed event fan-out and refresh-session management.
 
 Keeping these tradeoffs explicit makes the implementation easier to inspect and extend.
 See [architecture](docs/architecture.md) and [security](docs/security.md) for the reasoning.

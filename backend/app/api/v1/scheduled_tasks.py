@@ -1,8 +1,8 @@
 from datetime import datetime, timezone, timedelta
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, or_
+import json
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.dependencies import require_admin
@@ -16,7 +16,7 @@ from app.models.enums import (
     NotificationType,
     NotificationChannel,
 )
-from app.websocket.connection_manager import manager
+from app.services.outbox import queue_websocket, invalidate_available_orders
 from app.websocket.schemas import create_notification_message
 
 router = APIRouter(prefix="/scheduled-tasks", tags=["Автозадачи"])
@@ -52,6 +52,7 @@ async def renew_subscriptions_task(
             )
         )
 
+        stmt = stmt.with_for_update(skip_locked=True, of=Subscription)
         result = await db.execute(stmt)
         expired_subscriptions = result.scalars().all()
 
@@ -73,11 +74,11 @@ async def renew_subscriptions_task(
 
             notification = Notification(
                 user_id=user.id,
-                subscription_id=subscription.id,
+                data=json.dumps({"subscription_id": str(subscription.id)}),
                 notification_type=NotificationType.SUBSCRIPTION_RENEWED,
                 channel=NotificationChannel.IN_APP,
                 title="Подписка продлена",
-                message=f"Ваша подписка \"{subscription.tier.value}\" успешно продлена до {subscription.end_date.strftime('%d.%m.%Y')}",
+                message=f"Ваша подписка \"{subscription.tier}\" успешно продлена до {subscription.end_date.strftime('%d.%m.%Y')}",
                 sent_at=now,
             )
             db.add(notification)
@@ -91,7 +92,7 @@ async def renew_subscriptions_task(
                 "priority": "medium",
                 "created_at": notification.sent_at,
             })
-            await manager.send_personal_message(user.id, ws_message)
+            queue_websocket(db, user.id, ws_message)
 
             renewed_count += 1
 
@@ -137,6 +138,7 @@ async def cleanup_old_orders_task(
             )
         )
 
+        stmt = stmt.with_for_update(skip_locked=True, of=Order)
         result = await db.execute(stmt)
         old_orders = result.scalars().all()
 
@@ -144,6 +146,8 @@ async def cleanup_old_orders_task(
 
         for order in old_orders:
             order.status = OrderStatus.CANCELLED
+            order.cancelled_at = datetime.now(timezone.utc)
+            invalidate_available_orders(db)
 
             notification = Notification(
                 user_id=order.client_id,
@@ -165,7 +169,8 @@ async def cleanup_old_orders_task(
                 message=f"Заказ автоматически отменён (не найден курьер)",
                 old_status="PENDING"
             )
-            await manager.send_personal_message(order.client_id, ws_message)
+            ws_message["data"]["notification_id"] = str(notification.id)
+            queue_websocket(db, order.client_id, ws_message, aggregate_key=f"order:{order.id}")
 
             cancelled_count += 1
 
@@ -222,11 +227,11 @@ async def notify_expiring_subscriptions_task(
         for subscription in expiring_subscriptions:
             notification = Notification(
                 user_id=subscription.user_id,
-                subscription_id=subscription.id,
+                data=json.dumps({"subscription_id": str(subscription.id)}),
                 notification_type=NotificationType.SUBSCRIPTION_EXPIRING,
                 channel=NotificationChannel.IN_APP,
                 title="Подписка заканчивается",
-                message=f"Ваша подписка \"{subscription.tier.value}\" заканчивается {subscription.end_date.strftime('%d.%m.%Y')}. "
+                message=f"Ваша подписка \"{subscription.tier}\" заканчивается {subscription.end_date.strftime('%d.%m.%Y')}. "
                         f"{'Подписка будет автоматически продлена.' if subscription.auto_renew_enabled else 'Продлите подписку, чтобы продолжить пользоваться сервисом.'}",
                 sent_at=now,
             )
@@ -241,7 +246,7 @@ async def notify_expiring_subscriptions_task(
                 "priority": "high",
                 "created_at": notification.sent_at,
             })
-            await manager.send_personal_message(subscription.user_id, ws_message)
+            queue_websocket(db, subscription.user_id, ws_message)
 
             notified_count += 1
 
@@ -342,7 +347,7 @@ async def send_daily_courier_stats_task(
                     "date": today_start.strftime("%Y-%m-%d"),
                 }
             }
-            await manager.send_personal_message(courier_id, ws_message)
+            queue_websocket(db, courier_id, ws_message)
 
             notified_count += 1
 

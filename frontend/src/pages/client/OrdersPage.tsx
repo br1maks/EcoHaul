@@ -1,3 +1,4 @@
+import { useRealtimeRefresh } from '@/shared/hooks/useRealtimeRefresh';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOrders } from '@/features/orders/hooks/useOrders';
@@ -14,6 +15,8 @@ export const OrdersPage = () => {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useRealtimeRefresh(fetchOrders);
 
   if (loading && orders.length === 0) {
     return (

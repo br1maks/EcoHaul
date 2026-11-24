@@ -253,7 +253,7 @@ protocol than a reusable bearer credential in a URL.
 | `DOCS_ENABLED` | `False` | Exposes `/api/docs`, `/api/redoc` and `/api/openapi.json` independently |
 | `DEBUG` | `False` | One of two required conditions for development identity endpoints |
 | `ENABLE_DEV_AUTH` | `False` | Also requires `DEBUG=True`; synthetic identity/role and test-code paths |
-| `TELEGRAM_ENABLED` | `False` | Bot polling and queued Telegram notification delivery |
+| `TELEGRAM_ENABLED` | `False` | Bot polling, creation of new Telegram intents and outbox delivery |
 
 Never expose the development identity endpoints publicly. They intentionally permit
 synthetic identities and role selection. Enabling documentation is not permission to
@@ -272,6 +272,11 @@ responsibilities rather than protections claimed by the current image.
 
 Treat addresses, contacts and courier verification fields as sensitive. Logs, stored
 provider responses, backups and retention policies need the same review as API responses.
+The [outbox](events.md) stores delivery snapshots, which may include personal data.
+Operator status output excludes payloads; retry logs retain exception classes instead
+of credential-bearing transport errors. Restrict database/operator access and run the
+terminal-row retention command as part of the deployment policy. Pending rows are
+preserved for recovery, and therefore need backlog monitoring.
 Do not commit real bot/merchant credentials or private user records. Rotate a published
 credential even after removing it from the latest tree: Git history can retain it.
 

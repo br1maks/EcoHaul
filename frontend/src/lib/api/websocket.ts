@@ -10,6 +10,7 @@ class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private attempts = 0;
   private stopped = true;
+  private seenEventIds = new Set<string>();
 
   connect(token: string) {
     if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
@@ -18,15 +19,24 @@ class WebSocketManager {
     this.ws = socket;
     socket.onopen = () => { this.attempts = 0; };
     socket.onmessage = (event) => {
+      if (this.ws !== socket || this.stopped) return;
       try {
         const message: WsMessage = JSON.parse(event.data);
-        if (typeof message.type !== 'string' || typeof message.data !== 'object') return;
+        if (typeof message.type !== 'string' || !message.data || typeof message.data !== 'object') return;
+        if (typeof message.event_id === 'string') {
+          if (this.seenEventIds.has(message.event_id)) return;
+          this.seenEventIds.add(message.event_id);
+          if (this.seenEventIds.size > 1024) {
+            this.seenEventIds.delete(this.seenEventIds.values().next().value!);
+          }
+        }
         for (const handler of this.handlers.get(message.type) ?? []) handler(message);
         for (const handler of this.handlers.get('*') ?? []) handler(message);
       } catch { /* Ignore malformed messages; keep the connection available. */ }
     };
     socket.onclose = () => {
-      if (this.ws === socket) this.ws = null;
+      if (this.ws !== socket) return;
+      this.ws = null;
       if (this.stopped || this.attempts >= 5) return;
       const delay = 1000 * 2 ** this.attempts++;
       this.reconnectTimer = setTimeout(() => {

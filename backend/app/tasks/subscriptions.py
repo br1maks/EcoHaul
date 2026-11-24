@@ -8,6 +8,7 @@ from app.celery_app import celery_app
 from app.core.database import async_session_maker
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.services.outbox import queue_telegram
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ async def _deactivate_expired() -> None:
             Subscription.is_active == True,
             Subscription.end_date < now,
         )
+        stmt = stmt.with_for_update(skip_locked=True, of=Subscription)
         result = await db.execute(stmt)
         expired = result.scalars().all()
 
@@ -40,11 +42,10 @@ async def _deactivate_expired() -> None:
             user = user_result.scalar_one_or_none()
 
             if user and user.telegram_id:
-                from app.tasks.notifications import notify_user
-                notify_user.delay(
+                queue_telegram(db,
                     user.telegram_id,
                     "Ваша подписка истекла.\n"
-                    "Откройте приложение, чтобы продлить её и сохранить скидки."
+                    "Откройте приложение, чтобы продлить её и сохранить скидки.", aggregate_key=f"subscription:{sub.id}"
                 )
 
         await db.commit()
